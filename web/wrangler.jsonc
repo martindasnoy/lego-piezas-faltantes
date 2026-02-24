@@ -8,7 +8,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "web",
+	"name": "lego-piezas-faltantes",
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2026-02-24",
 	"compatibility_flags": [
@@ -29,7 +29,7 @@
 			// Self-reference service binding, the service name must match the worker name
 			// see https://opennext.js.org/cloudflare/caching
 			"binding": "WORKER_SELF_REFERENCE",
-			"service": "web"
+			"service": "lego-piezas-faltantes"
 		}
 	],
 	"observability": {
