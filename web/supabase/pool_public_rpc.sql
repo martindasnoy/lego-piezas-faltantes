@@ -8,6 +8,8 @@ returns table (
   id text,
   list_id text,
   owner_id text,
+  claimed_by_id text,
+  claimed_by_name text,
   part_num text,
   part_name text,
   color_name text,
@@ -24,6 +26,15 @@ as $$
     li.id::text,
     li.list_id::text,
     l.owner_id::text,
+    latest_offer.offered_by::text as claimed_by_id,
+    coalesce(
+      nullif(ou.raw_user_meta_data ->> 'display_name', ''),
+      nullif(ou.raw_user_meta_data ->> 'full_name', ''),
+      nullif(ou.raw_user_meta_data ->> 'name', ''),
+      nullif(split_part(ou.email, '@', 1), ''),
+      ou.email,
+      latest_offer.offered_by::text
+    ) as claimed_by_name,
     li.part_num,
     li.part_name,
     li.color_name,
@@ -37,6 +48,15 @@ as $$
   from public.list_items li
   join public.lists l on l.id::text = li.list_id::text
   left join auth.users u on u.id = l.owner_id
+  left join lateral (
+    select o.offered_by
+    from public.offers o
+    where o.list_item_id::text = li.id::text
+      and o.status in ('pending', 'accepted')
+    order by o.created_at desc
+    limit 1
+  ) as latest_offer on true
+  left join auth.users ou on ou.id = latest_offer.offered_by
   where l.is_public = true
   order by lower(coalesce(li.part_name, li.part_num)), li.part_num;
 $$;

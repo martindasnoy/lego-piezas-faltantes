@@ -10,6 +10,8 @@ type PoolLot = {
 	id: string;
 	list_id: string;
 	owner_id: string;
+	claimed_by_id?: string | null;
+	claimed_by_name?: string | null;
 	part_num: string;
 	part_name: string | null;
 	color_name: string | null;
@@ -26,16 +28,19 @@ type PartImageLookup = Record<string, string | null>;
 
 export default function PoolPage() {
 	const router = useRouter();
-	const loadingMessage = useMemo(() => getRandomLoadingMessage(), []);
+	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const [loading, setLoading] = useState(true);
 	const [message, setMessage] = useState<string | null>(null);
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+	const [currentUserName, setCurrentUserName] = useState<string>("Usuario");
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 
 	useEffect(() => {
+		setLoadingMessage(getRandomLoadingMessage());
+
 		async function loadPool() {
 			try {
 				const supabase = getSupabaseClient();
@@ -49,6 +54,11 @@ export default function PoolPage() {
 				}
 
 				setCurrentUserId(user.id);
+			setCurrentUserName(
+				(user.user_metadata?.display_name as string) ||
+					(user.user_metadata?.full_name as string) ||
+					(user.email?.split("@")[0] ?? "Usuario"),
+			);
 
 				const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_pool_lots");
 				if (rpcError) {
@@ -61,6 +71,8 @@ export default function PoolPage() {
 					id: lot.id,
 					list_id: lot.list_id,
 					owner_id: lot.owner_id,
+					claimed_by_id: lot.claimed_by_id,
+					claimed_by_name: lot.claimed_by_name,
 					part_num: lot.part_num,
 					part_name: lot.part_name,
 					color_name: lot.color_name,
@@ -78,6 +90,12 @@ export default function PoolPage() {
 		}
 
 		void loadPool();
+
+		const intervalId = window.setInterval(() => {
+			void loadPool();
+		}, 7000);
+
+		return () => window.clearInterval(intervalId);
 	}, [router]);
 
 	async function sendOffer(lot: PoolLot) {
@@ -96,6 +114,11 @@ export default function PoolPage() {
 			return;
 		}
 
+		if (lot.claimed_by_id) {
+			setMessage("Este lote ya fue marcado por otro usuario.");
+			return;
+		}
+
 		const quantity = Math.max(1, Math.floor(offerQtyByLot[lot.id] ?? 1));
 		setSendingOfferLotId(lot.id);
 		setMessage(null);
@@ -110,6 +133,18 @@ export default function PoolPage() {
 				setMessage(`No se pudo registrar tu oferta: ${error.message}. Ejecuta web/supabase/offers_create_rpc.sql`);
 				return;
 			}
+
+			setPublicLots((current) =>
+				current.map((item) =>
+					item.id === lot.id
+						? {
+								...item,
+								claimed_by_id: user.id,
+								claimed_by_name: currentUserName,
+						  }
+						: item,
+				),
+			);
 
 			setMessage("Oferta enviada. El dueno de la lista ya la ve en su lista.");
 		} finally {
@@ -214,15 +249,18 @@ export default function PoolPage() {
 													[lot.id]: Math.max(1, Number(event.target.value) || 1),
 												}))
 											}
+											disabled={Boolean(lot.claimed_by_id) || lot.owner_id === currentUserId}
 											className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
 										/>
 									<button
 										type="button"
 										onClick={() => void sendOffer(lot)}
-										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId}
+										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || Boolean(lot.claimed_by_id)}
 										className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
 									>
-										{lot.owner_id === currentUserId ? "Tu lote" : "Yo tengo"}
+										{lot.owner_id === currentUserId
+											? "Tu lote"
+											: lot.claimed_by_name?.trim() || (lot.claimed_by_id ? "Reservado" : "Yo tengo")}
 									</button>
 									</div>
 								</div>

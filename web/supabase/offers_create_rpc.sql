@@ -40,9 +40,24 @@ begin
     raise exception 'Lote no publico o propio';
   end if;
 
+  if exists (
+    select 1
+    from public.offers o
+    where o.list_item_id::text = p_list_item_id
+      and o.status in ('pending', 'accepted')
+  ) then
+    raise exception 'Este lote ya fue marcado como disponible';
+  end if;
+
   return query
   insert into public.offers (list_item_id, offered_by, quantity, status)
-  values (p_list_item_id, v_user, p_quantity, 'pending')
+  select li.id, v_user, p_quantity, 'pending'
+  from public.list_items li
+  join public.lists l on l.id::text = li.list_id::text
+  where li.id::text = p_list_item_id
+    and l.is_public = true
+    and l.owner_id <> v_user
+  limit 1
   returning offers.id, offers.list_item_id::text, offers.offered_by, offers.quantity, offers.status, offers.created_at;
 end;
 $$;

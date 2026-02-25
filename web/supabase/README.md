@@ -9,11 +9,11 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
 3. `offers_list_item_id_fix.sql`
    - Normaliza `offers.list_item_id` al tipo real de `list_items.id`.
 4. `pool_public_rpc.sql`
-   - Crea RPC para mostrar lotes publicos mezclados con `owner_name`.
+   - Crea RPC para mostrar lotes publicos mezclados con `owner_name` y quien marco `Yo tengo`.
 5. `offers_owner_rpc.sql`
    - Crea RPC para que el dueno vea ofertas por lote en su lista.
 6. `offers_create_rpc.sql`
-   - Crea RPC para insertar oferta con usuario real (`auth.uid()`).
+   - Crea RPC para insertar oferta con usuario real (`auth.uid()`) y evita duplicados por lote.
 
 ## Verificacion rapida
 

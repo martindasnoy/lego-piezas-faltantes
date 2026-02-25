@@ -43,7 +43,7 @@ type OfferRpcRow = {
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
-	const loadingMessage = useMemo(() => getRandomLoadingMessage(), []);
+	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const listId = params.id;
 
 	const [list, setList] = useState<ListInfo | null>(null);
@@ -138,6 +138,8 @@ export default function ListDetailPage() {
 	}, [partInput]);
 
 	useEffect(() => {
+		setLoadingMessage(getRandomLoadingMessage());
+
 		async function loadDetail() {
 			try {
 				const supabase = getSupabaseClient();
