@@ -9,6 +9,7 @@ import { getRandomLoadingMessage } from "@/lib/loading-messages";
 type PoolLot = {
 	id: string;
 	list_id: string;
+	owner_id: string;
 	part_num: string;
 	part_name: string | null;
 	color_name: string | null;
@@ -59,6 +60,7 @@ export default function PoolPage() {
 				const lots = ((rpcData as RpcPoolLot[]) ?? []).map((lot) => ({
 					id: lot.id,
 					list_id: lot.list_id,
+					owner_id: lot.owner_id,
 					part_num: lot.part_num,
 					part_name: lot.part_name,
 					color_name: lot.color_name,
@@ -79,8 +81,18 @@ export default function PoolPage() {
 	}, [router]);
 
 	async function sendOffer(lot: PoolLot) {
-		if (!currentUserId) {
+		const supabase = getSupabaseClient();
+		const {
+			data: { user },
+		} = await supabase.auth.getUser();
+
+		if (!user) {
 			setMessage("Debes iniciar sesion para ofrecer piezas.");
+			return;
+		}
+
+		if (lot.owner_id === user.id) {
+			setMessage("No puedes ofrecer en tu propio lote.");
 			return;
 		}
 
@@ -89,10 +101,9 @@ export default function PoolPage() {
 		setMessage(null);
 
 		try {
-			const supabase = getSupabaseClient();
 			const { error } = await supabase.from("offers").insert({
 				list_item_id: lot.id,
-				offered_by: currentUserId,
+				offered_by: user.id,
 				quantity,
 				status: "pending",
 			});
@@ -207,14 +218,14 @@ export default function PoolPage() {
 											}
 											className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
 										/>
-										<button
-											type="button"
-											onClick={() => void sendOffer(lot)}
-											disabled={sendingOfferLotId === lot.id}
-											className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
-										>
-											Yo tengo
-										</button>
+									<button
+										type="button"
+										onClick={() => void sendOffer(lot)}
+										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId}
+										className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
+									>
+										{lot.owner_id === currentUserId ? "Tu lote" : "Yo tengo"}
+									</button>
 									</div>
 								</div>
 							</article>

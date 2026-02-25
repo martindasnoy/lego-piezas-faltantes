@@ -7,6 +7,7 @@ create or replace function public.get_public_pool_lots()
 returns table (
   id text,
   list_id text,
+  owner_id text,
   part_num text,
   part_name text,
   color_name text,
@@ -22,6 +23,7 @@ as $$
   select
     li.id::text,
     li.list_id::text,
+    l.owner_id::text,
     li.part_num,
     li.part_name,
     li.color_name,
