@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
+import { getRandomLoadingMessage } from "@/lib/loading-messages";
 
 type UserList = {
 	id: string;
@@ -16,6 +17,7 @@ type UserList = {
 
 export default function DashboardPage() {
 	const router = useRouter();
+	const loadingMessage = useMemo(() => getRandomLoadingMessage(), []);
 	const [userEmail, setUserEmail] = useState("");
 	const [displayName, setDisplayName] = useState("");
 	const [lists, setLists] = useState<UserList[]>([]);
@@ -177,7 +179,7 @@ export default function DashboardPage() {
 	}
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">Cargando dashboard...</div>;
+		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
 	}
 
 	return (

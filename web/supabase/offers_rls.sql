@@ -25,7 +25,7 @@ with check (
     select 1
     from public.list_items li
     join public.lists l on l.id::text = li.list_id::text
-    where li.id::text = public.offers.list_item_id
+    where li.id::text = public.offers.list_item_id::text
       and l.is_public = true
   )
 );
@@ -49,7 +49,7 @@ using (
     select 1
     from public.list_items li
     join public.lists l on l.id::text = li.list_id::text
-    where li.id::text = public.offers.list_item_id
+    where li.id::text = public.offers.list_item_id::text
       and l.owner_id = auth.uid()
   )
 );
@@ -65,7 +65,7 @@ using (
     select 1
     from public.list_items li
     join public.lists l on l.id::text = li.list_id::text
-    where li.id::text = public.offers.list_item_id
+    where li.id::text = public.offers.list_item_id::text
       and l.owner_id = auth.uid()
   )
 )
@@ -74,7 +74,7 @@ with check (
     select 1
     from public.list_items li
     join public.lists l on l.id::text = li.list_id::text
-    where li.id::text = public.offers.list_item_id
+    where li.id::text = public.offers.list_item_id::text
       and l.owner_id = auth.uid()
   )
 );

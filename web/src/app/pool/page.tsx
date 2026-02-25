@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
+import { getRandomLoadingMessage } from "@/lib/loading-messages";
 
 type PoolLot = {
 	id: string;
@@ -24,6 +25,7 @@ type PartImageLookup = Record<string, string | null>;
 
 export default function PoolPage() {
 	const router = useRouter();
+	const loadingMessage = useMemo(() => getRandomLoadingMessage(), []);
 	const [loading, setLoading] = useState(true);
 	const [message, setMessage] = useState<string | null>(null);
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
@@ -49,7 +51,7 @@ export default function PoolPage() {
 
 				const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_pool_lots");
 				if (rpcError) {
-					setMessage(`Pool no configurado: ${rpcError.message}. Ejecuta web/supabase/pool_public_rpc.sql`);
+					setMessage(`Pool no configurado: ${rpcError.message}. Ejecuta scripts segun web/supabase/README.md`);
 					setPublicLots([]);
 					return;
 				}
@@ -150,7 +152,7 @@ export default function PoolPage() {
 	}, [publicLots]);
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">Cargando pool...</div>;
+		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
 	}
 
 	return (
@@ -166,7 +168,7 @@ export default function PoolPage() {
 
 				{lotCards.length === 0 ? (
 					<section className="rounded-xl border border-slate-200 p-5 text-sm text-slate-600">
-						No hay lotes publicos por ahora. Si ya hay listas publicas, ejecuta `web/supabase/pool_rls.sql` en Supabase.
+						No hay lotes publicos por ahora. Si ya hay listas publicas, revisa el orden SQL en `web/supabase/README.md`.
 					</section>
 				) : (
 					<section className="space-y-2">

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
+import { getRandomLoadingMessage } from "@/lib/loading-messages";
 
 type ListInfo = {
 	id: string;
@@ -27,11 +28,22 @@ type PartSuggestion = {
 };
 
 type PartImageLookup = Record<string, string | null>;
-type OfferSummaryByLot = Record<string, { offers: number; pieces: number }>;
+type OfferSummaryByLot = Record<
+	string,
+	{ offers: number; pieces: number; byUser: Array<{ name: string; pieces: number }> }
+>;
+
+type OfferRpcRow = {
+	list_item_id: string;
+	offered_by_name: string | null;
+	quantity: number;
+	status: string;
+};
 
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
+	const loadingMessage = useMemo(() => getRandomLoadingMessage(), []);
 	const listId = params.id;
 
 	const [list, setList] = useState<ListInfo | null>(null);
@@ -278,11 +290,9 @@ export default function ListDetailPage() {
 
 		try {
 			const supabase = getSupabaseClient();
-			const { data, error } = await supabase
-				.from("offers")
-				.select("list_item_id,quantity,status")
-				.in("list_item_id", lotIds)
-				.in("status", ["pending", "accepted"]);
+			const { data, error } = await supabase.rpc("get_offers_for_owner_list", {
+				p_list_id: String(listId),
+			});
 
 			if (error) {
 				setOffersByLot({});
@@ -290,12 +300,24 @@ export default function ListDetailPage() {
 			}
 
 			const summary: OfferSummaryByLot = {};
-			for (const row of data ?? []) {
+			for (const row of (data as OfferRpcRow[]) ?? []) {
+				if (!(row.status === "pending" || row.status === "accepted")) continue;
+				if (!lotIds.includes(String(row.list_item_id))) continue;
+
 				const key = String(row.list_item_id);
-				const current = summary[key] ?? { offers: 0, pieces: 0 };
+				const current = summary[key] ?? { offers: 0, pieces: 0, byUser: [] };
+				const userName = row.offered_by_name?.trim() || "Usuario";
+				const existing = current.byUser.find((u) => u.name === userName);
+				if (existing) {
+					existing.pieces += Number(row.quantity ?? 0);
+				} else {
+					current.byUser.push({ name: userName, pieces: Number(row.quantity ?? 0) });
+				}
+
 				summary[key] = {
 					offers: current.offers + 1,
 					pieces: current.pieces + Number(row.quantity ?? 0),
+					byUser: current.byUser,
 				};
 			}
 
@@ -447,7 +469,7 @@ export default function ListDetailPage() {
 	}
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">Cargando lista...</div>;
+		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
 	}
 
 	if (!list) {
@@ -465,10 +487,12 @@ export default function ListDetailPage() {
 		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
-					<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
-						← Volver
-					</Link>
-					<h1 className="mt-2 text-3xl font-semibold text-slate-900">{list.name}</h1>
+					<div className="flex items-start justify-between gap-3">
+						<h1 className="text-3xl font-semibold text-slate-900">Lista {list.name.toLocaleUpperCase("es-AR")}</h1>
+						<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+							← Volver
+						</Link>
+					</div>
 					<p className="mt-1 text-sm text-slate-600">
 						Visibilidad: {list.is_public ? "Publica" : "Privada"} - Lotes: {totals.lots} - Piezas: {totals.pieces}
 					</p>
@@ -623,69 +647,71 @@ export default function ListDetailPage() {
 						<ul className="mt-4 space-y-3">
 							{lots.map((lot) => (
 								<li key={lot.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-									<div className="flex flex-wrap items-center gap-3 text-sm text-slate-800">
+									<div className="flex items-start gap-3 text-sm text-slate-800">
 										{partImages[lot.part_num] ? (
 											<img
 												src={partImages[lot.part_num] ?? undefined}
 												alt={lot.part_name || lot.part_num}
-												className="h-7 w-7 rounded border border-slate-200 bg-white object-contain"
+												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
 											/>
 										) : (
-											<div className="h-7 w-7 rounded border border-slate-200 bg-white" />
+											<div className="h-16 w-16 rounded border border-slate-200 bg-white" />
 										)}
-										<span className="font-semibold text-slate-900">#{lot.part_num}</span>
-										<span className="font-medium text-slate-900">{lot.part_name || "Sin nombre"}</span>
-										<span
-											className="h-4 w-4 rounded border border-slate-300"
-											style={{ backgroundColor: getColorHexFromName(lot.color_name) }}
-											title={lot.color_name || "Sin color"}
-										/>
-										<div className="ml-auto flex items-center gap-1">
-											<button
-												type="button"
-												onClick={() => persistLotQuantity(lot.id, lot.quantity - 1)}
-												disabled={lot.quantity <= 1 || updatingLotId === lot.id}
-												className="h-7 w-7 rounded border border-slate-300 text-slate-700 disabled:opacity-50"
-											>
-												-
-											</button>
+
+										<div className="min-w-0 flex-1">
+											<div className="flex items-start justify-between gap-2">
+												<p className="max-w-[520px] overflow-hidden text-slate-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+													{lot.part_name || "Sin nombre"}
+												</p>
+												<div
+													className={`shrink-0 rounded-md px-3 py-1 text-xs ${offersByLot[String(lot.id)] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}
+												>
+													{offersByLot[String(lot.id)]
+														? offersByLot[String(lot.id)].byUser
+															.map((u) => `${u.name} (${u.pieces})`)
+															.join(", ")
+														: "Sin ofertas"}
+												</div>
+											</div>
+
+									<div className="mt-2 flex items-center justify-between gap-2">
+										<div className="flex items-center gap-2">
+											<span
+												className="h-4 w-4 rounded border border-slate-300"
+												style={{ backgroundColor: getColorHexFromName(lot.color_name) }}
+												title={lot.color_name || "Sin color"}
+											/>
+											<span className="font-semibold text-slate-900">#{lot.part_num}</span>
 											<input
 												type="number"
 												min={1}
 												value={lot.quantity}
-												onChange={(event) => {
-													const parsed = Number(event.target.value);
-													if (!Number.isFinite(parsed)) return;
-													setLocalLotQuantity(lot.id, Math.max(1, parsed));
-												}}
+														onChange={(event) => {
+															const parsed = Number(event.target.value);
+															if (!Number.isFinite(parsed)) return;
+															setLocalLotQuantity(lot.id, Math.max(1, parsed));
+														}}
 												onBlur={(event) => {
 													const parsed = Number(event.target.value);
 													void persistLotQuantity(lot.id, Number.isFinite(parsed) ? parsed : lot.quantity);
 												}}
-												className="w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm"
+												disabled={updatingLotId === lot.id}
+												className="quantity-input w-16 appearance-auto rounded border border-slate-300 px-2 py-1 text-center text-sm disabled:opacity-50"
 											/>
+										</div>
+
+										<div className="flex items-center gap-1">
 											<button
 												type="button"
-												onClick={() => persistLotQuantity(lot.id, lot.quantity + 1)}
-												disabled={updatingLotId === lot.id}
-												className="h-7 w-7 rounded border border-slate-300 text-slate-700 disabled:opacity-50"
-											>
-												+
-											</button>
+												onClick={() => deleteLot(lot.id)}
+														disabled={deletingLotId === lot.id}
+														className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+													>
+														Eliminar
+													</button>
+												</div>
+											</div>
 										</div>
-										<button
-											type="button"
-											onClick={() => deleteLot(lot.id)}
-											disabled={deletingLotId === lot.id}
-											className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-										>
-											Eliminar
-										</button>
-										{offersByLot[String(lot.id)] ? (
-											<p className="text-xs font-medium text-emerald-700">
-												Te ofrecen {offersByLot[String(lot.id)].pieces} piezas ({offersByLot[String(lot.id)].offers} usuarios)
-											</p>
-										) : null}
 									</div>
 								</li>
 							))}

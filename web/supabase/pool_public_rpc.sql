@@ -16,6 +16,7 @@ returns table (
 )
 language sql
 security definer
+stable
 set search_path = public
 as $$
   select
@@ -32,8 +33,8 @@ as $$
       l.owner_id::text
     ) as owner_name
   from public.list_items li
-  join public.lists l on l.id = li.list_id
-  join auth.users u on u.id = l.owner_id
+  join public.lists l on l.id::text = li.list_id::text
+  left join auth.users u on u.id = l.owner_id
   where l.is_public = true
   order by lower(coalesce(li.part_name, li.part_num)), li.part_num;
 $$;
