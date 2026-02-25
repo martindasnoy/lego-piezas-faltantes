@@ -101,15 +101,13 @@ export default function PoolPage() {
 		setMessage(null);
 
 		try {
-			const { error } = await supabase.from("offers").insert({
-				list_item_id: lot.id,
-				offered_by: user.id,
-				quantity,
-				status: "pending",
+			const { error } = await supabase.rpc("create_offer_for_lot", {
+				p_list_item_id: lot.id,
+				p_quantity: quantity,
 			});
 
 			if (error) {
-				setMessage(`No se pudo registrar tu oferta: ${error.message}`);
+				setMessage(`No se pudo registrar tu oferta: ${error.message}. Ejecuta web/supabase/offers_create_rpc.sql`);
 				return;
 			}
 
