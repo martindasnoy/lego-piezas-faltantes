@@ -20,6 +20,10 @@ as $$
     o.list_item_id::text,
     coalesce(
       nullif(u.raw_user_meta_data ->> 'display_name', ''),
+      nullif(u.raw_user_meta_data ->> 'full_name', ''),
+      nullif(u.raw_user_meta_data ->> 'name', ''),
+      nullif(u.raw_user_meta_data ->> 'user_name', ''),
+      nullif(split_part(u.email, '@', 1), ''),
       u.email,
       o.offered_by::text
     ) as offered_by_name,

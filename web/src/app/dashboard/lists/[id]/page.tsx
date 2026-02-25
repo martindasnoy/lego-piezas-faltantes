@@ -327,6 +327,33 @@ export default function ListDetailPage() {
 		}
 	}
 
+	useEffect(() => {
+		if (loading || !list) return;
+
+		const lotIds = lots.map((lot) => String(lot.id));
+		if (lotIds.length === 0) {
+			setOffersByLot({});
+			return;
+		}
+
+		void loadOffersForLots(lotIds);
+
+		const intervalId = window.setInterval(() => {
+			void loadOffersForLots(lotIds);
+		}, 6000);
+
+		function onFocus() {
+			void loadOffersForLots(lotIds);
+		}
+
+		window.addEventListener("focus", onFocus);
+
+		return () => {
+			window.clearInterval(intervalId);
+			window.removeEventListener("focus", onFocus);
+		};
+	}, [loading, list, lots, listId]);
+
 	async function createLot(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setSaving(true);

@@ -185,18 +185,11 @@ export default function DashboardPage() {
 	return (
 		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
-				<header className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
+				<header className="border-b border-slate-200 pb-5">
 					<div>
 						<h1 className="text-4xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
 						<p className="text-sm text-slate-500">Email: {userEmail}</p>
 					</div>
-					<button
-						type="button"
-						onClick={logout}
-						className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-					>
-						Cerrar sesion
-					</button>
 				</header>
 
 				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-4 sm:p-5">
@@ -295,6 +288,16 @@ export default function DashboardPage() {
 				</section>
 
 				{message ? <p className="text-sm text-slate-700">{message}</p> : null}
+
+				<div className="border-t border-slate-200 pt-2">
+					<button
+						type="button"
+						onClick={logout}
+						className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+					>
+						Cerrar sesion
+					</button>
+				</div>
 			</main>
 		</div>
 	);
