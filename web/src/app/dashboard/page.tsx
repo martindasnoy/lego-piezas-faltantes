@@ -28,6 +28,15 @@ export default function DashboardPage() {
 	const [switchingId, setSwitchingId] = useState<string | null>(null);
 	const [deletingListId, setDeletingListId] = useState<string | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<UserList | null>(null);
+	const [showUserSettings, setShowUserSettings] = useState(false);
+	const [settingsNameInput, setSettingsNameInput] = useState("");
+	const [settingsEmailInput, setSettingsEmailInput] = useState("");
+	const [showPasswordModal, setShowPasswordModal] = useState(false);
+	const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+	const [newPasswordInput, setNewPasswordInput] = useState("");
+	const [newPasswordConfirmInput, setNewPasswordConfirmInput] = useState("");
+	const [settingsSaving, setSettingsSaving] = useState(false);
+	const [passwordSaving, setPasswordSaving] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 
 	async function loadLists(ownerId: string) {
@@ -213,6 +222,115 @@ export default function DashboardPage() {
 		}
 	}
 
+	function openUserSettings() {
+		setSettingsNameInput(displayName || "");
+		setSettingsEmailInput(userEmail || "");
+		setShowPasswordModal(false);
+		setCurrentPasswordInput("");
+		setNewPasswordInput("");
+		setNewPasswordConfirmInput("");
+		setShowUserSettings(true);
+	}
+
+	function openPasswordSettings() {
+		setCurrentPasswordInput("");
+		setNewPasswordInput("");
+		setNewPasswordConfirmInput("");
+		setShowPasswordModal(true);
+	}
+
+	async function saveUserSettings() {
+		setSettingsSaving(true);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const nextName = settingsNameInput.trim();
+			const nextEmail = settingsEmailInput.trim().toLowerCase();
+
+			const updatePayload: {
+				data: { display_name: string };
+				email?: string;
+			} = {
+				data: {
+					display_name: nextName,
+				},
+			};
+
+			if (nextEmail && nextEmail !== userEmail.toLowerCase()) {
+				updatePayload.email = nextEmail;
+			}
+
+			const { error } = await supabase.auth.updateUser(updatePayload);
+
+			if (error) {
+				setMessage(`No se pudo actualizar usuario: ${error.message}`);
+				return;
+			}
+
+			setDisplayName(nextName);
+			if (nextEmail) {
+				setUserEmail(nextEmail);
+			}
+			setShowPasswordModal(false);
+			setShowUserSettings(false);
+			setMessage(updatePayload.email ? "Usuario actualizado. Revisa tu correo para confirmar el nuevo email." : "Usuario actualizado.");
+		} finally {
+			setSettingsSaving(false);
+		}
+	}
+
+	async function savePasswordSettings() {
+		setPasswordSaving(true);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const oldPassword = currentPasswordInput.trim();
+			const nextPassword = newPasswordInput.trim();
+			const nextPasswordConfirm = newPasswordConfirmInput.trim();
+
+			if (!oldPassword) {
+				setMessage("Completa la contrasena vieja.");
+				return;
+			}
+
+			if (nextPassword.length < 6) {
+				setMessage("La nueva contrasena debe tener al menos 6 caracteres.");
+				return;
+			}
+
+			if (nextPassword !== nextPasswordConfirm) {
+				setMessage("Las contrasenas nuevas no coinciden.");
+				return;
+			}
+
+			const { error: verifyError } = await supabase.auth.signInWithPassword({
+				email: userEmail,
+				password: oldPassword,
+			});
+
+			if (verifyError) {
+				setMessage("La contrasena vieja no coincide.");
+				return;
+			}
+
+			const { error: updateError } = await supabase.auth.updateUser({ password: nextPassword });
+			if (updateError) {
+				setMessage(`No se pudo actualizar la contrasena: ${updateError.message}`);
+				return;
+			}
+
+			setShowPasswordModal(false);
+			setCurrentPasswordInput("");
+			setNewPasswordInput("");
+			setNewPasswordConfirmInput("");
+			setMessage("Contrasena actualizada correctamente.");
+		} finally {
+			setPasswordSaving(false);
+		}
+	}
+
 	if (loading) {
 		return (
 			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
@@ -226,14 +344,27 @@ export default function DashboardPage() {
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
 					<div>
-						<h1 className="text-4xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
+						<div className="flex items-center gap-2">
+							<h1 className="text-4xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
+							<button
+								type="button"
+								onClick={openUserSettings}
+								className="rounded-md border border-slate-300 p-1.5 text-slate-700 hover:bg-slate-50"
+								aria-label="Configuracion de usuario"
+							>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+									<path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
+									<path d="m19.4 13.5.1-3-1.9-.5a6 6 0 0 0-.6-1.4l1-1.7-2.1-2.1-1.7 1a6 6 0 0 0-1.4-.6L12.5 3h-3l-.5 1.9a6 6 0 0 0-1.4.6l-1.7-1-2.1 2.1 1 1.7a6 6 0 0 0-.6 1.4L3 10.5v3l1.9.5a6 6 0 0 0 .6 1.4l-1 1.7 2.1 2.1 1.7-1a6 6 0 0 0 1.4.6l.5 1.9h3l.5-1.9a6 6 0 0 0 1.4-.6l1.7 1 2.1-2.1-1-1.7a6 6 0 0 0 .6-1.4l1.9-.5Z" />
+								</svg>
+							</button>
+						</div>
 						<p className="text-sm text-slate-500">Email: {userEmail}</p>
 					</div>
 				</header>
 
-				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-4 sm:p-5">
+				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-3 sm:p-4">
 					<h2 className="text-xl font-semibold text-slate-900">Crear nueva lista</h2>
-					<form onSubmit={createList} className="mt-4 space-y-4">
+					<form onSubmit={createList} className="mt-3 space-y-3">
 						<div>
 							<input
 								id="listName"
@@ -365,6 +496,118 @@ export default function DashboardPage() {
 										No
 									</button>
 								</div>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showUserSettings ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
+						<div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+							<h3 className="text-xl text-slate-900">Configuracion de usuario</h3>
+							<label className="mt-4 block text-sm text-slate-700" htmlFor="settingsDisplayName">
+								Nombre
+							</label>
+							<input
+								id="settingsDisplayName"
+								type="text"
+								value={settingsNameInput}
+								onChange={(event) => setSettingsNameInput(event.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+							/>
+							<label className="mt-3 block text-sm text-slate-700" htmlFor="settingsEmail">
+								Email
+							</label>
+							<input
+								id="settingsEmail"
+								type="email"
+								value={settingsEmailInput}
+								onChange={(event) => setSettingsEmailInput(event.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+							/>
+							<button
+								type="button"
+								onClick={openPasswordSettings}
+								className="mt-3 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+							>
+								Cambiar contrasena
+							</button>
+							<div className="mt-4 flex justify-end gap-2">
+								<button
+									type="button"
+									onClick={() => {
+										setShowPasswordModal(false);
+										setShowUserSettings(false);
+									}}
+									disabled={settingsSaving}
+									className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+								>
+									Cancelar
+								</button>
+								<button
+									type="button"
+									onClick={saveUserSettings}
+									disabled={settingsSaving}
+									className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+								>
+									{settingsSaving ? "Guardando..." : "Guardar"}
+								</button>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showPasswordModal ? (
+					<div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/55 p-4">
+						<div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+							<h3 className="text-xl text-slate-900">Cambiar contrasena</h3>
+							<label className="mt-4 block text-sm text-slate-700" htmlFor="currentPassword">
+								Contrasena vieja
+							</label>
+							<input
+								id="currentPassword"
+								type="password"
+								value={currentPasswordInput}
+								onChange={(event) => setCurrentPasswordInput(event.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+							/>
+							<label className="mt-3 block text-sm text-slate-700" htmlFor="newPassword">
+								Contrasena nueva
+							</label>
+							<input
+								id="newPassword"
+								type="password"
+								value={newPasswordInput}
+								onChange={(event) => setNewPasswordInput(event.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+							/>
+							<label className="mt-3 block text-sm text-slate-700" htmlFor="newPasswordConfirm">
+								Repetir contrasena nueva
+							</label>
+							<input
+								id="newPasswordConfirm"
+								type="password"
+								value={newPasswordConfirmInput}
+								onChange={(event) => setNewPasswordConfirmInput(event.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+							/>
+							<div className="mt-4 flex justify-end gap-2">
+								<button
+									type="button"
+									onClick={() => setShowPasswordModal(false)}
+									disabled={passwordSaving}
+									className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+								>
+									Cancelar
+								</button>
+								<button
+									type="button"
+									onClick={savePasswordSettings}
+									disabled={passwordSaving}
+									className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+								>
+									{passwordSaving ? "Guardando..." : "Guardar"}
+								</button>
 							</div>
 						</div>
 					</div>

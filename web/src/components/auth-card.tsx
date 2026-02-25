@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signInUser, signUpUser } from "@/lib/auth";
+import { requestPasswordReset, signInUser, signUpUser } from "@/lib/auth";
 
 type Mode = "login" | "register";
 
@@ -14,6 +14,7 @@ export function AuthCard() {
 	const [password, setPassword] = useState("");
 	const [displayName, setDisplayName] = useState("");
 	const [loading, setLoading] = useState(false);
+	const [resetLoading, setResetLoading] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 
 	const isLogin = mode === "login";
@@ -53,6 +54,25 @@ export function AuthCard() {
 		}
 
 		setLoading(false);
+	}
+
+	async function onForgotPassword() {
+		const cleanEmail = email.trim().toLowerCase();
+		if (!cleanEmail) {
+			setMessage("Escribe tu email para recuperar contrasena.");
+			return;
+		}
+
+		setResetLoading(true);
+		setMessage(null);
+		try {
+			const origin = typeof window !== "undefined" ? window.location.origin : "";
+			const redirectTo = `${origin}/reset-password`;
+			const result = await requestPasswordReset({ email: cleanEmail, redirectTo });
+			setMessage(result.message);
+		} finally {
+			setResetLoading(false);
+		}
 	}
 
 	return (
@@ -100,9 +120,6 @@ export function AuthCard() {
 						<label htmlFor="password" className="block text-sm font-medium text-slate-800">
 							Contrasena
 						</label>
-						{isLogin ? (
-							<span className="text-xs font-medium text-slate-500">Minimo 6 caracteres</span>
-						) : null}
 					</div>
 					<input
 						id="password"
@@ -112,6 +129,19 @@ export function AuthCard() {
 						placeholder="********"
 						className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
 					/>
+					{isLogin ? (
+						<div className="mt-2 flex items-center justify-between">
+							<span className="text-xs font-medium text-slate-500">Minimo 6 caracteres</span>
+							<button
+								type="button"
+								onClick={() => void onForgotPassword()}
+								disabled={resetLoading}
+								className="text-xs font-semibold text-slate-800 hover:underline disabled:opacity-50"
+							>
+								{resetLoading ? "Enviando..." : "No recuerdo la contrasena"}
+							</button>
+						</div>
+					) : null}
 				</div>
 
 				<button

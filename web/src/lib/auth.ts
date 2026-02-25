@@ -14,6 +14,11 @@ type AuthResult = {
 	message: string;
 };
 
+type ResetPasswordInput = {
+	email: string;
+	redirectTo: string;
+};
+
 export async function signInUser({ email, password }: AuthInput): Promise<AuthResult> {
 	try {
 		const { error } = await getSupabaseClient().auth.signInWithPassword({
@@ -54,6 +59,24 @@ export async function signUpUser({ email, password, displayName }: SignUpInput):
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "No se pudo crear la cuenta.";
+		return { ok: false, message };
+	}
+}
+
+export async function requestPasswordReset({ email, redirectTo }: ResetPasswordInput): Promise<AuthResult> {
+	try {
+		const { error } = await getSupabaseClient().auth.resetPasswordForEmail(email, { redirectTo });
+
+		if (error) {
+			return { ok: false, message: error.message };
+		}
+
+		return {
+			ok: true,
+			message: "Si el email existe, te enviamos un enlace para cambiar la contrasena.",
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "No se pudo iniciar la recuperacion de contrasena.";
 		return { ok: false, message };
 	}
 }

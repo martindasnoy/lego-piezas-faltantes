@@ -47,6 +47,13 @@ type CatalogCategory = {
 	part_count: number;
 };
 
+type CatalogPart = {
+	part_num: string;
+	name: string;
+	part_img_url: string | null;
+	is_printed: boolean;
+};
+
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
@@ -77,6 +84,17 @@ export default function ListDetailPage() {
 	const [catalogError, setCatalogError] = useState<string | null>(null);
 	const [catalogCategories, setCatalogCategories] = useState<CatalogCategory[]>([]);
 	const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("popular");
+	const [catalogView, setCatalogView] = useState<"categories" | "parts">("categories");
+	const [catalogSelectedCategory, setCatalogSelectedCategory] = useState<CatalogCategory | null>(null);
+	const [catalogParts, setCatalogParts] = useState<CatalogPart[]>([]);
+	const [selectedCatalogPart, setSelectedCatalogPart] = useState<CatalogPart | null>(null);
+	const [catalogPartsPage, setCatalogPartsPage] = useState(1);
+	const [catalogPartsTotalPages, setCatalogPartsTotalPages] = useState(1);
+	const [catalogPageInput, setCatalogPageInput] = useState("1");
+	const [catalogShowPrinted, setCatalogShowPrinted] = useState(true);
+	const [catalogShowNonPrinted, setCatalogShowNonPrinted] = useState(true);
+	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
+	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 
 	const totals = useMemo(() => {
@@ -130,7 +148,29 @@ export default function ListDetailPage() {
 			.sort(byName);
 	}, [catalogCategories, catalogFilter]);
 
+	const filteredCatalogParts = useMemo(() => {
+		return catalogParts.filter((part) => {
+			if (part.is_printed && !catalogShowPrinted) return false;
+			if (!part.is_printed && !catalogShowNonPrinted) return false;
+			return true;
+		});
+	}, [catalogParts, catalogShowPrinted, catalogShowNonPrinted]);
+
 	useEffect(() => {
+		if (!selectedCatalogPart) return;
+		const stillVisible = filteredCatalogParts.some((part) => part.part_num === selectedCatalogPart.part_num);
+		if (!stillVisible) {
+			setSelectedCatalogPart(null);
+		}
+	}, [filteredCatalogParts, selectedCatalogPart]);
+
+	useEffect(() => {
+		if (selectedPart) {
+			setSuggestions([]);
+			setLoadingSuggestions(false);
+			return;
+		}
+
 		const query = partInput.trim();
 		if (query.length < 2) {
 			setSuggestions([]);
@@ -162,7 +202,7 @@ export default function ListDetailPage() {
 		}, 650);
 
 		return () => clearTimeout(timer);
-	}, [partInput]);
+	}, [partInput, selectedPart]);
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -458,6 +498,16 @@ export default function ListDetailPage() {
 
 	async function openCatalogModal() {
 		setShowCatalogModal(true);
+		setCatalogView("categories");
+		setCatalogSelectedCategory(null);
+		setCatalogParts([]);
+		setSelectedCatalogPart(null);
+		setCatalogPartsPage(1);
+		setCatalogPartsTotalPages(1);
+		setCatalogPageInput("1");
+		setCatalogShowPrinted(true);
+		setCatalogShowNonPrinted(true);
+		setCatalogPartsError(null);
 		setCatalogError(null);
 		setCatalogFilter("popular");
 
@@ -484,6 +534,93 @@ export default function ListDetailPage() {
 		} finally {
 			setCatalogLoading(false);
 		}
+	}
+
+	function closeCatalogModal() {
+		setShowCatalogModal(false);
+		setCatalogView("categories");
+		setCatalogSelectedCategory(null);
+		setCatalogParts([]);
+		setSelectedCatalogPart(null);
+		setCatalogPartsError(null);
+		setCatalogPartsPage(1);
+		setCatalogPartsTotalPages(1);
+		setCatalogPageInput("1");
+		setCatalogShowPrinted(true);
+		setCatalogShowNonPrinted(true);
+	}
+
+	async function openCategoryParts(
+		category: CatalogCategory,
+		page = 1,
+		overrides?: { includePrinted?: boolean; includeNonPrinted?: boolean },
+	) {
+		setCatalogView("parts");
+		setCatalogSelectedCategory(category);
+		setSelectedCatalogPart(null);
+		setCatalogPartsLoading(true);
+		setCatalogPartsError(null);
+		const includePrinted = overrides?.includePrinted ?? catalogShowPrinted;
+		const includeNonPrinted = overrides?.includeNonPrinted ?? catalogShowNonPrinted;
+
+		try {
+			const response = await fetch(
+				`/api/rebrickable/parts-by-category?category_id=${category.id}&page=${page}&page_size=20&include_printed=${includePrinted}&include_non_printed=${includeNonPrinted}`,
+			);
+			const payload = (await response.json()) as {
+				results?: CatalogPart[];
+				page?: number;
+				total_pages?: number;
+				error?: string;
+			};
+
+			if (!response.ok) {
+				setCatalogPartsError(payload.error ?? "No se pudieron cargar piezas de esta categoria.");
+				setCatalogParts([]);
+				return;
+			}
+
+			setCatalogParts(payload.results ?? []);
+			const nextPage = Number(payload.page ?? page);
+			setCatalogPartsPage(nextPage);
+			setCatalogPartsTotalPages(Number(payload.total_pages ?? 1));
+			setCatalogPageInput(String(nextPage));
+		} catch {
+			setCatalogPartsError("No se pudieron cargar piezas de esta categoria.");
+			setCatalogParts([]);
+		} finally {
+			setCatalogPartsLoading(false);
+		}
+	}
+
+	function goToCatalogPage() {
+		if (!catalogSelectedCategory) return;
+		const parsed = Number(catalogPageInput);
+		if (!Number.isFinite(parsed)) return;
+		const targetPage = Math.max(1, Math.min(catalogPartsTotalPages, Math.floor(parsed)));
+		setCatalogPageInput(String(targetPage));
+		void openCategoryParts(catalogSelectedCategory, targetPage);
+	}
+
+	function addSelectedCatalogPart() {
+		if (!selectedCatalogPart) return;
+
+	setSelectedPart({
+		part_num: selectedCatalogPart.part_num,
+		name: selectedCatalogPart.name,
+		part_img_url: selectedCatalogPart.part_img_url,
+	});
+	setPartInput(selectedCatalogPart.name || selectedCatalogPart.part_num);
+		setSuggestions([]);
+
+		if (selectedCatalogPart.part_img_url) {
+			setPartImages((current) => ({
+				...current,
+				[selectedCatalogPart.part_num]: selectedCatalogPart.part_img_url,
+			}));
+		}
+
+		closeCatalogModal();
 	}
 
 	function getColorHexFromName(colorName: string | null) {
@@ -822,72 +959,219 @@ export default function ListDetailPage() {
 					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
 						<div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
 							<div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-								<div className="flex flex-wrap items-center gap-2">
-									<h3 className="mr-1 text-2xl text-slate-900">Categorias</h3>
-									<button
-										type="button"
-										onClick={() => setCatalogFilter("popular")}
-										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "popular" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
-									>
-										Popular
-									</button>
-									<button
-										type="button"
-										onClick={() => setCatalogFilter("minifigs")}
-										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "minifigs" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
-									>
-										Minifigs
-									</button>
-									<button
-										type="button"
-										onClick={() => setCatalogFilter("technic")}
-										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "technic" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
-									>
-										Technic
-									</button>
-									<button
-										type="button"
-										onClick={() => setCatalogFilter("others")}
-										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "others" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
-									>
-										Others
-									</button>
-									<button
-										type="button"
-										onClick={() => setCatalogFilter("all")}
-										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "all" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
-									>
-										All
-									</button>
-								</div>
-								<button
-									type="button"
-									onClick={() => setShowCatalogModal(false)}
-									className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-								>
-									Cerrar
-								</button>
-							</div>
-
-							{catalogLoading ? <p className="mt-4 text-sm text-slate-600">Cargando categorias...</p> : null}
-							{catalogError ? <p className="mt-4 text-sm text-red-700">{catalogError}</p> : null}
-
-							{!catalogLoading && !catalogError ? (
-								<ul className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
-										{filteredCatalogCategories.map((category) => (
-										<li key={category.id}>
+								{catalogView === "categories" ? (
+									<div className="flex flex-wrap items-center gap-2">
+										<h3 className="mr-1 text-2xl text-slate-900">Categorias</h3>
+										<button
+											type="button"
+											onClick={() => setCatalogFilter("popular")}
+											className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "popular" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+										>
+											Popular
+										</button>
+										<button
+											type="button"
+											onClick={() => setCatalogFilter("minifigs")}
+											className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "minifigs" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+										>
+											Minifigs
+										</button>
+										<button
+											type="button"
+											onClick={() => setCatalogFilter("technic")}
+											className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "technic" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+										>
+											Technic
+										</button>
+										<button
+											type="button"
+											onClick={() => setCatalogFilter("others")}
+											className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "others" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+										>
+											Others
+										</button>
+										<button
+											type="button"
+											onClick={() => setCatalogFilter("all")}
+											className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "all" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+										>
+											All
+										</button>
+									</div>
+								) : (
+									<div className="flex flex-col gap-1">
+										<div className="flex items-center gap-2">
 											<button
 												type="button"
-												disabled
-												className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-900"
+												onClick={() => {
+													setCatalogView("categories");
+													setCatalogPartsError(null);
+												}}
+												className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50"
 											>
-												<span className="font-medium">{category.name}</span>
-												<span className="ml-2 text-xs text-slate-500">({category.part_count} parts)</span>
+												←
 											</button>
-										</li>
-										))}
-									</ul>
-							) : null}
+											<h3 className="text-xl text-slate-900">{catalogSelectedCategory?.name ?? "Piezas"}</h3>
+										</div>
+										<div className="flex items-center gap-1">
+											<button
+												type="button"
+												onClick={() => {
+													const next = !catalogShowNonPrinted;
+													setCatalogShowNonPrinted(next);
+													if (catalogSelectedCategory) {
+														void openCategoryParts(catalogSelectedCategory, 1, {
+															includePrinted: catalogShowPrinted,
+															includeNonPrinted: next,
+														});
+													}
+												}}
+												className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${catalogShowNonPrinted ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+											>
+												No impresas
+											</button>
+											<button
+												type="button"
+												onClick={() => {
+													const next = !catalogShowPrinted;
+													setCatalogShowPrinted(next);
+													if (catalogSelectedCategory) {
+														void openCategoryParts(catalogSelectedCategory, 1, {
+															includePrinted: next,
+															includeNonPrinted: catalogShowNonPrinted,
+														});
+													}
+												}}
+												className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${catalogShowPrinted ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+											>
+												Impresas
+											</button>
+										</div>
+									</div>
+								)}
+
+								<div className="flex items-center gap-2">
+									{catalogView === "parts" ? (
+										<>
+											<div className="flex items-center gap-2">
+													<button
+														type="button"
+														onClick={() => {
+															if (!catalogSelectedCategory || catalogPartsPage <= 1) return;
+															void openCategoryParts(catalogSelectedCategory, catalogPartsPage - 1);
+														}}
+														disabled={catalogPartsLoading || catalogPartsPage <= 1}
+														className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+													>
+														←
+													</button>
+													<span className="rounded-md border border-slate-300 px-1.5 py-1 text-xs text-slate-700">
+														<input
+															type="text"
+															inputMode="numeric"
+															value={catalogPageInput}
+															onChange={(event) => setCatalogPageInput(event.target.value.replace(/\D/g, ""))}
+															onKeyDown={(event) => {
+																if (event.key === "Enter") {
+																	event.preventDefault();
+																	goToCatalogPage();
+																}
+															}}
+															disabled={catalogPartsLoading}
+															className="w-8 border-none bg-transparent text-center text-xs text-slate-800 outline-none disabled:opacity-50"
+														/>
+														/{catalogPartsTotalPages}
+													</span>
+													<button
+														type="button"
+														onClick={() => {
+															if (!catalogSelectedCategory || catalogPartsPage >= catalogPartsTotalPages) return;
+															void openCategoryParts(catalogSelectedCategory, catalogPartsPage + 1);
+														}}
+														disabled={catalogPartsLoading || catalogPartsPage >= catalogPartsTotalPages}
+														className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+													>
+														→
+													</button>
+												</div>
+										</>
+									) : null}
+									<button
+										type="button"
+										onClick={closeCatalogModal}
+										className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+									>
+										Cerrar
+									</button>
+								</div>
+							</div>
+
+							{catalogView === "categories" ? (
+								<>
+									{catalogLoading ? <p className="mt-4 text-sm text-slate-600">Cargando categorias...</p> : null}
+									{catalogError ? <p className="mt-4 text-sm text-red-700">{catalogError}</p> : null}
+
+									{!catalogLoading && !catalogError ? (
+										<ul className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+											{filteredCatalogCategories.map((category) => (
+												<li key={category.id}>
+													<button
+														type="button"
+														onClick={() => void openCategoryParts(category, 1)}
+														className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100"
+													>
+														<span className="font-medium">{category.name}</span>
+														<span className="ml-2 text-xs text-slate-500">({category.part_count} parts)</span>
+													</button>
+												</li>
+											))}
+										</ul>
+									) : null}
+								</>
+							) : (
+								<>
+									{catalogPartsLoading ? <p className="mt-4 text-sm text-slate-600">Cargando piezas...</p> : null}
+									{catalogPartsError ? <p className="mt-4 text-sm text-red-700">{catalogPartsError}</p> : null}
+									{!catalogPartsLoading && !catalogPartsError ? (
+										<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">
+											{filteredCatalogParts.map((part) => (
+												<button
+													key={part.part_num}
+													type="button"
+													onClick={() => setSelectedCatalogPart(part)}
+													className={`rounded-lg border p-2 text-left transition duration-200 ${selectedCatalogPart?.part_num === part.part_num ? "z-10 scale-110 border-[#006eb2] bg-white shadow-lg" : "border-slate-200 bg-slate-50 hover:scale-105 hover:bg-white"}`}
+												>
+													<div className="flex h-20 items-center justify-center rounded bg-white">
+														{part.part_img_url ? (
+															<img src={part.part_img_url} alt={part.part_num} className="h-16 w-16 object-contain" />
+														) : (
+															<div className="h-16 w-16 rounded bg-slate-100" />
+														)}
+													</div>
+													<p className="mt-2 text-center text-xs font-semibold text-slate-800">{part.part_num}</p>
+												</button>
+											))}
+										</div>
+									) : null}
+
+									{!catalogPartsLoading && !catalogPartsError && filteredCatalogParts.length === 0 ? (
+										<p className="mt-4 text-center text-sm text-slate-600">No hay piezas con ese filtro en esta pagina.</p>
+									) : null}
+
+									{!catalogPartsLoading && !catalogPartsError ? (
+										<div className="mt-4 flex justify-center">
+											<button
+												type="button"
+												onClick={addSelectedCatalogPart}
+												disabled={!selectedCatalogPart}
+												className="rounded-md bg-[#006eb2] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:cursor-not-allowed disabled:opacity-50"
+											>
+												Agregar
+											</button>
+										</div>
+									) : null}
+								</>
+							)}
 						</div>
 					</div>
 				) : null}

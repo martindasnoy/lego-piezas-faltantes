@@ -1,0 +1,29 @@
+name: Rebrickable Prewarm
+
+on:
+  schedule:
+    - cron: "0 3 */10 * *"
+  workflow_dispatch:
+
+jobs:
+  prewarm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secrets
+        run: |
+          if [ -z "${{ secrets.PREWARM_BASE_URL }}" ]; then echo "Missing PREWARM_BASE_URL"; exit 1; fi
+          if [ -z "${{ secrets.REBRICKABLE_PREWARM_TOKEN }}" ]; then echo "Missing REBRICKABLE_PREWARM_TOKEN"; exit 1; fi
+
+      - name: Prewarm all categories
+        run: |
+          BASE_URL="${{ secrets.PREWARM_BASE_URL }}"
+          TOKEN="${{ secrets.REBRICKABLE_PREWARM_TOKEN }}"
+
+          ids=$(curl -fsSL "$BASE_URL/api/rebrickable/prewarm?list=1" -H "x-prewarm-token: $TOKEN" | jq -r '.results[].id')
+
+          for id in $ids; do
+            echo "Prewarming category $id"
+            curl -fsSL -X POST "$BASE_URL/api/rebrickable/prewarm?category_id=$id" -H "x-prewarm-token: $TOKEN" > /dev/null
+          done
+
+          echo "Done"
