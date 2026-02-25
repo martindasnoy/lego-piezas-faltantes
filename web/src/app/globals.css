@@ -24,3 +24,22 @@ body {
 	color: var(--foreground);
 	font-family: Arial, Helvetica, sans-serif;
 }
+
+h1,
+h2,
+h3 {
+	font-family: var(--font-chewy), cursive !important;
+	font-weight: 400;
+	letter-spacing: 0.01em;
+}
+
+.quantity-input::-webkit-outer-spin-button,
+.quantity-input::-webkit-inner-spin-button {
+	opacity: 1;
+	margin: 0;
+}
+
+.quantity-input[type="number"] {
+	appearance: auto;
+	-moz-appearance: auto;
+}

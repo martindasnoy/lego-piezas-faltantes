@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 
@@ -196,7 +197,7 @@ export default function DashboardPage() {
 					</button>
 				</header>
 
-				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
+				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-4 sm:p-5">
 					<h2 className="text-xl font-semibold text-slate-900">Crear nueva lista</h2>
 					<form onSubmit={createList} className="mt-4 space-y-4">
 						<div>
@@ -210,66 +211,85 @@ export default function DashboardPage() {
 							/>
 						</div>
 
-						<label className="flex items-center gap-2 text-sm text-slate-700">
-							<input
-								type="checkbox"
-								checked={isPublic}
-								onChange={(event) => setIsPublic(event.target.checked)}
-								className="h-4 w-4"
-							/>
-							Lista publica (visible en el pool)
-						</label>
+						<div className="flex items-center justify-between gap-3 pr-2">
+							<label className="flex items-center gap-2 text-sm text-slate-700">
+								<input
+									type="checkbox"
+									checked={isPublic}
+									onChange={(event) => setIsPublic(event.target.checked)}
+									className="h-4 w-4"
+								/>
+								Lista publica (visible en el pool)
+							</label>
 
-						<button
-							type="submit"
-							disabled={saving}
-							className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							{saving ? "Guardando..." : "Crear lista"}
-						</button>
+							<button
+								type="submit"
+								disabled={saving}
+								className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								{saving ? "Guardando..." : "Crear lista"}
+							</button>
+						</div>
 					</form>
 				</section>
 
-				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<h2 className="text-xl font-semibold text-slate-900">Tus listas creadas</h2>
-					{lists.length === 0 ? (
-						<p className="mt-3 text-sm text-slate-600">Todavia no creaste listas.</p>
-					) : (
-						<ul className="mt-4 space-y-3">
-							{lists.map((list) => (
-								<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-									<div className="flex items-start justify-between gap-3">
-										<div>
-											<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
-												{list.name}
-											</Link>
-											<p className="mt-1 text-xs text-slate-500">
-												Lotes: {list.lots_count} - Piezas: {list.pieces_count}
-											</p>
+				<section className="grid gap-4 md:grid-cols-3">
+					<div className="rounded-xl border border-slate-200 p-4 sm:p-5 md:col-span-2">
+						<h2 className="text-xl font-semibold text-slate-900">Tus listas creadas</h2>
+						{lists.length === 0 ? (
+							<p className="mt-3 text-sm text-slate-600">Todavia no creaste listas.</p>
+						) : (
+							<ul className="mt-4 space-y-3">
+								{lists.map((list) => (
+									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+										<div className="flex items-start justify-between gap-3">
+											<div>
+												<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
+													{list.name}
+												</Link>
+												<p className="mt-1 text-xs text-slate-500">
+													Lotes: {list.lots_count} - Piezas: {list.pieces_count}
+												</p>
+											</div>
+											<div className="flex flex-wrap justify-end gap-2">
+												<button
+													type="button"
+													onClick={() => switchVisibility(list.id, false)}
+													disabled={switchingId === list.id || !list.is_public}
+													className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+												>
+													Privado
+												</button>
+												<button
+													type="button"
+													onClick={() => switchVisibility(list.id, true)}
+													disabled={switchingId === list.id || list.is_public}
+													className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+												>
+													Publico
+												</button>
+											</div>
 										</div>
-										<div className="flex flex-wrap justify-end gap-2">
-											<button
-												type="button"
-												onClick={() => switchVisibility(list.id, false)}
-												disabled={switchingId === list.id || !list.is_public}
-												className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-											>
-												Privado
-											</button>
-											<button
-												type="button"
-												onClick={() => switchVisibility(list.id, true)}
-												disabled={switchingId === list.id || list.is_public}
-												className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-											>
-												Publico
-											</button>
-										</div>
-									</div>
-								</li>
-							))}
-						</ul>
-					)}
+									</li>
+								))}
+							</ul>
+						)}
+					</div>
+
+					<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
+						<div className="flex justify-center">
+							<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
+						</div>
+						<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
+						<div className="mt-4 flex justify-center">
+							<Link
+								href="/pool"
+								className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+							>
+								Entrar al pool
+							</Link>
+						</div>
+					</div>
 				</section>
 
 				{message ? <p className="text-sm text-slate-700">{message}</p> : null}

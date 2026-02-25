@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
+import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
 
 type ListInfo = {
 	id: string;
@@ -19,6 +20,14 @@ type Lot = {
 	quantity: number;
 };
 
+type PartSuggestion = {
+	part_num: string;
+	name: string;
+	part_img_url: string | null;
+};
+
+type PartImageLookup = Record<string, string | null>;
+
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
@@ -27,11 +36,22 @@ export default function ListDetailPage() {
 	const [list, setList] = useState<ListInfo | null>(null);
 	const [lots, setLots] = useState<Lot[]>([]);
 	const [partInput, setPartInput] = useState("");
+	const [selectedPart, setSelectedPart] = useState<PartSuggestion | null>(null);
+	const [suggestions, setSuggestions] = useState<PartSuggestion[]>([]);
+	const [partImages, setPartImages] = useState<PartImageLookup>({});
+	const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 	const [colorInput, setColorInput] = useState("");
+	const [availableColors, setAvailableColors] = useState<GobrickColor[]>(gobrickColors);
+	const [selectedColor, setSelectedColor] = useState<GobrickColor | null>(null);
+	const [showColorSuggestions, setShowColorSuggestions] = useState(false);
+	const [useBricklinkNomenclature, setUseBricklinkNomenclature] = useState(true);
 	const [quantityInput, setQuantityInput] = useState(1);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
+	const [updatingLotId, setUpdatingLotId] = useState<string | null>(null);
+	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
+	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 
 	const totals = useMemo(() => {
 		return lots.reduce(
@@ -43,6 +63,65 @@ export default function ListDetailPage() {
 			{ pieces: 0, lots: 0 },
 		);
 	}, [lots]);
+
+	const filteredColors = useMemo(() => {
+		const query = colorInput.trim().toLowerCase();
+		const visibleName = (color: GobrickColor) => {
+			if (useBricklinkNomenclature) {
+				return color.blName?.trim() || color.name;
+			}
+			return color.name;
+		};
+
+		if (!query) return availableColors;
+
+		return availableColors
+			.filter((color) => {
+				const legoName = color.name.toLowerCase();
+				const blName = (color.blName ?? "").toLowerCase();
+				return (
+					visibleName(color).toLowerCase().includes(query) ||
+					legoName.includes(query) ||
+					blName.includes(query) ||
+					String(color.id).includes(query)
+				);
+			})
+			;
+	}, [availableColors, colorInput, useBricklinkNomenclature]);
+
+	useEffect(() => {
+		const query = partInput.trim();
+		if (query.length < 2) {
+			setSuggestions([]);
+			setLoadingSuggestions(false);
+			return;
+		}
+
+		const timer = setTimeout(async () => {
+			setLoadingSuggestions(true);
+			try {
+				const response = await fetch(`/api/rebrickable/parts?q=${encodeURIComponent(query)}`);
+				const payload = (await response.json()) as {
+					results?: PartSuggestion[];
+					error?: string;
+				};
+
+				if (!response.ok) {
+					setSuggestions([]);
+					setMessage(payload.error ?? "No se pudo buscar en Rebrickable.");
+					return;
+				}
+
+				setSuggestions(payload.results ?? []);
+			} catch {
+				setSuggestions([]);
+			} finally {
+				setLoadingSuggestions(false);
+			}
+		}, 650);
+
+		return () => clearTimeout(timer);
+	}, [partInput]);
 
 	useEffect(() => {
 		async function loadDetail() {
@@ -81,7 +160,9 @@ export default function ListDetailPage() {
 				if (lotError) {
 					setMessage("No se pudieron cargar los lotes de esta lista.");
 				} else {
-					setLots((lotRows as Lot[]) ?? []);
+					const loadedLots = (lotRows as Lot[]) ?? [];
+					setLots(loadedLots);
+					void loadPartImages(loadedLots.map((lot) => lot.part_num));
 				}
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir la lista.";
@@ -94,6 +175,98 @@ export default function ListDetailPage() {
 		void loadDetail();
 	}, [listId, router]);
 
+	useEffect(() => {
+		async function loadColors() {
+			try {
+				const supabase = getSupabaseClient();
+				const { data, error } = await supabase
+					.from("gobrick_colors")
+					.select("id,name,bl_name,lego_available,hex")
+					.order("id", { ascending: true });
+
+				if (error || !data || data.length === 0) {
+					return;
+				}
+
+				function normalizeHex(value: unknown) {
+					if (typeof value !== "string") return "#d1d5db";
+					const raw = value.trim().replace(/^#/, "");
+					if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+						return `#${raw
+							.split("")
+							.map((char) => `${char}${char}`)
+							.join("")
+							.toLowerCase()}`;
+					}
+					if (/^[0-9a-fA-F]{6}$/.test(raw)) return `#${raw.toLowerCase()}`;
+					if (/^[0-9a-fA-F]{8}$/.test(raw)) return `#${raw.slice(0, 6).toLowerCase()}`;
+					return "#d1d5db";
+				}
+
+				const mapped: GobrickColor[] = data
+					.map((row) => ({
+						id: Number(row.id),
+						name: String(row.name),
+						blName: typeof row.bl_name === "string" ? row.bl_name : "",
+						hex: normalizeHex(row.hex),
+						uniqueFlag: !Boolean(row.lego_available) || !String(row.bl_name ?? "").trim(),
+					}))
+					.filter((row) => Number.isFinite(row.id) && row.name.length > 0);
+
+				if (mapped.length > 0) {
+					setAvailableColors(mapped);
+				}
+			} catch {
+				// Si no existe la tabla aun, se usa fallback local.
+			}
+		}
+
+		void loadColors();
+	}, []);
+
+	useEffect(() => {
+		function handleOutsideClick(event: MouseEvent) {
+			if (!showColorSuggestions) return;
+			if (!colorDropdownRef.current) return;
+
+			const target = event.target as Node;
+			if (!colorDropdownRef.current.contains(target)) {
+				setShowColorSuggestions(false);
+			}
+		}
+
+		document.addEventListener("mousedown", handleOutsideClick);
+		return () => document.removeEventListener("mousedown", handleOutsideClick);
+	}, [showColorSuggestions]);
+
+	async function loadPartImages(partNums: string[]) {
+		const uniqueNums = [...new Set(partNums.map((num) => num.trim()).filter(Boolean))];
+		if (uniqueNums.length === 0) return;
+
+		const missingNums = uniqueNums.filter((num) => !(num in partImages));
+		if (missingNums.length === 0) return;
+
+		try {
+			const response = await fetch(`/api/rebrickable/parts-by-num?nums=${encodeURIComponent(missingNums.join(","))}`);
+			if (!response.ok) return;
+
+			const payload = (await response.json()) as {
+				results?: Array<{ part_num: string; part_img_url: string | null }>;
+			};
+
+			const additions: PartImageLookup = {};
+			for (const part of payload.results ?? []) {
+				additions[part.part_num] = part.part_img_url;
+			}
+
+			if (Object.keys(additions).length > 0) {
+				setPartImages((current) => ({ ...current, ...additions }));
+			}
+		} catch {
+			// No bloquea si falla carga de imagenes.
+		}
+	}
+
 	async function createLot(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setSaving(true);
@@ -102,7 +275,17 @@ export default function ListDetailPage() {
 		try {
 			const supabase = getSupabaseClient();
 			const piece = partInput.trim();
-			const color = colorInput.trim();
+			const partNum = selectedPart?.part_num || piece;
+			const partName = selectedPart?.name || piece;
+			const selectedColorName = selectedColor
+				? useBricklinkNomenclature
+					? selectedColor.blName?.trim() || selectedColor.name
+					: selectedColor.name
+				: "";
+
+			const color = selectedColor
+				? `${selectedColorName}${selectedColor.uniqueFlag ? " (Chino)" : ""}`
+				: colorInput.trim();
 			const quantity = Number(quantityInput);
 
 			if (!piece) {
@@ -121,8 +304,8 @@ export default function ListDetailPage() {
 				.from("list_items")
 				.insert({
 					list_id: listId,
-					part_num: piece,
-					part_name: piece,
+					part_num: partNum,
+					part_name: partName,
 					color_name: color || null,
 					quantity,
 				})
@@ -136,14 +319,86 @@ export default function ListDetailPage() {
 			}
 
 			setLots((current) => [data as Lot, ...current]);
+			if (selectedPart?.part_img_url) {
+				setPartImages((current) => ({ ...current, [partNum]: selectedPart.part_img_url }));
+			} else {
+				void loadPartImages([partNum]);
+			}
 			setPartInput("");
+			setSelectedPart(null);
+			setSuggestions([]);
 			setColorInput("");
+			setSelectedColor(null);
+			setShowColorSuggestions(false);
 			setQuantityInput(1);
 		} catch (error) {
 			const text = error instanceof Error ? error.message : "No se pudo crear el lote.";
 			setMessage(text);
 		} finally {
 			setSaving(false);
+		}
+	}
+
+	function getColorHexFromName(colorName: string | null) {
+		if (!colorName) return "#d1d5db";
+
+		const normalized = colorName.replace("(Chino)", "").trim().toLowerCase();
+		const match = availableColors.find((color) => {
+			const lego = color.name.toLowerCase();
+			const bl = (color.blName ?? "").trim().toLowerCase();
+			return normalized === lego || (bl.length > 0 && normalized === bl);
+		});
+
+		return match?.hex ?? "#d1d5db";
+	}
+
+	function setLocalLotQuantity(lotId: string, nextQuantity: number) {
+		setLots((current) =>
+			current.map((lot) => (lot.id === lotId ? { ...lot, quantity: Number.isFinite(nextQuantity) ? nextQuantity : lot.quantity } : lot)),
+		);
+	}
+
+	async function persistLotQuantity(lotId: string, nextQuantity: number) {
+		const quantity = Math.max(1, Math.floor(nextQuantity));
+		setUpdatingLotId(lotId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("list_items").update({ quantity }).eq("id", lotId);
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			setLocalLotQuantity(lotId, quantity);
+		} finally {
+			setUpdatingLotId(null);
+		}
+	}
+
+	async function deleteLot(lotId: string) {
+		setDeletingLotId(lotId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase.from("list_items").delete().eq("id", lotId).select("id");
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			if (!data || data.length === 0) {
+				setMessage("No se pudo eliminar en base de datos. Revisa permisos RLS de DELETE.");
+				return;
+			}
+
+			setLots((current) => current.filter((lot) => lot.id !== lotId));
+		} finally {
+			setDeletingLotId(null);
 		}
 	}
 
@@ -176,51 +431,213 @@ export default function ListDetailPage() {
 				</header>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<h2 className="text-xl font-semibold text-slate-900">Nuevo lote</h2>
-					<form onSubmit={createLot} className="mt-4 grid gap-4 sm:grid-cols-3">
-						<input
-							type="text"
-							value={partInput}
-							onChange={(event) => setPartInput(event.target.value)}
-							placeholder="Pieza (codigo o nombre)"
-							className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-						/>
-						<input
-							type="text"
-							value={colorInput}
-							onChange={(event) => setColorInput(event.target.value)}
-							placeholder="Color"
-							className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-						/>
-						<input
-							type="number"
-							min={1}
-							value={quantityInput}
-							onChange={(event) => setQuantityInput(Number(event.target.value))}
-							className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-						/>
-						<button
-							type="submit"
-							disabled={saving}
-							className="sm:col-span-3 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							{saving ? "Guardando..." : "Agregar lote"}
-						</button>
+					<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
+					<form onSubmit={createLot} className="mt-4 space-y-4">
+						<div className="relative sm:col-span-3">
+							<input
+								type="text"
+								value={partInput}
+								onChange={(event) => {
+									setPartInput(event.target.value);
+									setSelectedPart(null);
+								}}
+								placeholder="Buscar como Brick 1x1 o #3005"
+								className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+							/>
+							{loadingSuggestions ? (
+								<p className="mt-1 text-xs text-slate-500">Buscando en Rebrickable...</p>
+							) : null}
+							{suggestions.length > 0 ? (
+								<ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-300 bg-white">
+									{suggestions.map((part) => (
+										<li key={part.part_num}>
+											<button
+												type="button"
+												onClick={() => {
+													setSelectedPart(part);
+													setPartInput(`${part.part_num} - ${part.name}`);
+													setSuggestions([]);
+												}}
+												className="flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+											>
+												{part.part_img_url ? (
+													<img src={part.part_img_url} alt={part.name} className="h-9 w-9 rounded object-contain" />
+												) : (
+													<div className="h-9 w-9 rounded bg-slate-100" />
+												)}
+												<span className="flex flex-col">
+													<span className="text-sm font-semibold text-slate-900">{part.name}</span>
+													<span className="text-xs text-slate-600">{part.part_num}</span>
+												</span>
+											</button>
+										</li>
+									))}
+								</ul>
+							) : null}
+						</div>
+
+						<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_200px] md:items-start">
+							<div ref={colorDropdownRef} className="relative">
+								<input
+									type="text"
+									value={colorInput}
+									onFocus={() => setShowColorSuggestions(true)}
+									onChange={(event) => {
+										setColorInput(event.target.value);
+										setSelectedColor(null);
+										setShowColorSuggestions(true);
+									}}
+									placeholder={
+										useBricklinkNomenclature ? "Color BrickLink (nombre)" : "Color LEGO (nombre)"
+									}
+									className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+								/>
+								{showColorSuggestions && filteredColors.length > 0 ? (
+									<ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-300 bg-white">
+										{filteredColors.map((color) => (
+											<li key={color.id}>
+												<button
+													type="button"
+													onClick={() => {
+														setSelectedColor(color);
+														const displayName = useBricklinkNomenclature
+															? color.blName?.trim() || color.name
+															: color.name;
+														setColorInput(displayName);
+														setShowColorSuggestions(false);
+													}}
+													className="flex w-full items-center gap-2 border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+												>
+													<span className="h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: color.hex }} />
+													<span className="text-sm text-slate-900">
+														{useBricklinkNomenclature ? color.blName?.trim() || color.name : color.name}
+													</span>
+													{color.uniqueFlag ? (
+														<span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+															Chino
+														</span>
+													) : null}
+												</button>
+											</li>
+										))}
+									</ul>
+								) : null}
+								<div className="mt-2 flex gap-2">
+									<button
+										type="button"
+										onClick={() => {
+											setUseBricklinkNomenclature(true);
+											setSelectedColor(null);
+											setColorInput("");
+										}}
+										className={`h-7 w-20 rounded-md px-2 py-1 text-[10px] font-medium ${useBricklinkNomenclature ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+									>
+										Color BL
+									</button>
+									<button
+										type="button"
+										onClick={() => {
+											setUseBricklinkNomenclature(false);
+											setSelectedColor(null);
+											setColorInput("");
+										}}
+										className={`h-7 w-20 rounded-md px-2 py-1 text-[10px] font-medium ${!useBricklinkNomenclature ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+									>
+										Color LEGO
+									</button>
+								</div>
+							</div>
+
+							<div className="flex flex-col items-end gap-2">
+								<div className="w-28">
+									<input
+										type="number"
+										min={1}
+										step={1}
+										value={quantityInput}
+										onChange={(event) => setQuantityInput(Number(event.target.value))}
+										className="quantity-input w-full appearance-auto rounded-lg border border-slate-300 px-2 py-2 text-center text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+									/>
+								</div>
+								<button
+									type="submit"
+									disabled={saving}
+									className="h-11 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									{saving ? "Guardando..." : "Agregar lote"}
+								</button>
+							</div>
+						</div>
 					</form>
 				</section>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<h2 className="text-xl font-semibold text-slate-900">Lotes de la lista</h2>
+					<h2 className="text-2xl font-semibold text-slate-900">Lotes de la lista</h2>
 					{lots.length === 0 ? (
 						<p className="mt-3 text-sm text-slate-600">Todavia no agregaste lotes.</p>
 					) : (
 						<ul className="mt-4 space-y-3">
 							{lots.map((lot) => (
-								<li key={lot.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-									<p className="font-medium text-slate-900">{lot.part_name || lot.part_num}</p>
-									<p className="mt-1 text-sm text-slate-600">
-										Color: {lot.color_name || "Sin color"} - Cantidad: {lot.quantity}
-									</p>
+								<li key={lot.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+									<div className="flex flex-wrap items-center gap-3 text-sm text-slate-800">
+										{partImages[lot.part_num] ? (
+											<img
+												src={partImages[lot.part_num] ?? undefined}
+												alt={lot.part_name || lot.part_num}
+												className="h-7 w-7 rounded border border-slate-200 bg-white object-contain"
+											/>
+										) : (
+											<div className="h-7 w-7 rounded border border-slate-200 bg-white" />
+										)}
+										<span className="font-semibold text-slate-900">#{lot.part_num}</span>
+										<span className="font-medium text-slate-900">{lot.part_name || "Sin nombre"}</span>
+										<span
+											className="h-4 w-4 rounded border border-slate-300"
+											style={{ backgroundColor: getColorHexFromName(lot.color_name) }}
+											title={lot.color_name || "Sin color"}
+										/>
+										<div className="ml-auto flex items-center gap-1">
+											<button
+												type="button"
+												onClick={() => persistLotQuantity(lot.id, lot.quantity - 1)}
+												disabled={lot.quantity <= 1 || updatingLotId === lot.id}
+												className="h-7 w-7 rounded border border-slate-300 text-slate-700 disabled:opacity-50"
+											>
+												-
+											</button>
+											<input
+												type="number"
+												min={1}
+												value={lot.quantity}
+												onChange={(event) => {
+													const parsed = Number(event.target.value);
+													if (!Number.isFinite(parsed)) return;
+													setLocalLotQuantity(lot.id, Math.max(1, parsed));
+												}}
+												onBlur={(event) => {
+													const parsed = Number(event.target.value);
+													void persistLotQuantity(lot.id, Number.isFinite(parsed) ? parsed : lot.quantity);
+												}}
+												className="w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm"
+											/>
+											<button
+												type="button"
+												onClick={() => persistLotQuantity(lot.id, lot.quantity + 1)}
+												disabled={updatingLotId === lot.id}
+												className="h-7 w-7 rounded border border-slate-300 text-slate-700 disabled:opacity-50"
+											>
+												+
+											</button>
+										</div>
+										<button
+											type="button"
+											onClick={() => deleteLot(lot.id)}
+											disabled={deletingLotId === lot.id}
+											className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+										>
+											Eliminar
+										</button>
+									</div>
 								</li>
 							))}
 						</ul>
