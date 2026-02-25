@@ -26,6 +26,8 @@ export default function DashboardPage() {
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [switchingId, setSwitchingId] = useState<string | null>(null);
+	const [deletingListId, setDeletingListId] = useState<string | null>(null);
+	const [deleteTarget, setDeleteTarget] = useState<UserList | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 
 	async function loadLists(ownerId: string) {
@@ -180,9 +182,40 @@ export default function DashboardPage() {
 		}
 	}
 
+	async function confirmDeleteList() {
+		if (!deleteTarget) return;
+
+		setDeletingListId(deleteTarget.id);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+
+			const { error: deleteItemsError } = await supabase.from("list_items").delete().eq("list_id", deleteTarget.id);
+
+			if (deleteItemsError) {
+				setMessage(`No se pudieron borrar los items de la lista: ${deleteItemsError.message}`);
+				return;
+			}
+
+			const { error: deleteListError } = await supabase.from("lists").delete().eq("id", deleteTarget.id);
+
+			if (deleteListError) {
+				setMessage(`No se pudo eliminar la lista: ${deleteListError.message}`);
+				return;
+			}
+
+			setLists((current) => current.filter((list) => list.id !== deleteTarget.id));
+			setDeleteTarget(null);
+			setMessage("Lista eliminada correctamente.");
+		} finally {
+			setDeletingListId(null);
+		}
+	}
+
 	if (loading) {
 		return (
-			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
 				{loadingMessage}
 			</div>
 		);
@@ -252,11 +285,12 @@ export default function DashboardPage() {
 													Lotes: {list.lots_count} - Piezas: {list.pieces_count}
 												</p>
 											</div>
+										<div className="flex flex-col items-end gap-2">
 											<div className="flex flex-wrap justify-end gap-2">
 												<button
 													type="button"
 													onClick={() => switchVisibility(list.id, false)}
-													disabled={switchingId === list.id || !list.is_public}
+													disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
 													className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
 												>
 													Privado
@@ -264,12 +298,21 @@ export default function DashboardPage() {
 												<button
 													type="button"
 													onClick={() => switchVisibility(list.id, true)}
-													disabled={switchingId === list.id || list.is_public}
+													disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
 													className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
 												>
 													Publico
 												</button>
 											</div>
+											<button
+												type="button"
+												onClick={() => setDeleteTarget(list)}
+												disabled={switchingId === list.id || deletingListId === list.id}
+												className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+											>
+												Eliminar lista
+											</button>
+										</div>
 										</div>
 									</li>
 								))}
@@ -294,6 +337,38 @@ export default function DashboardPage() {
 				</section>
 
 				{message ? <p className="text-sm text-slate-700">{message}</p> : null}
+
+				{deleteTarget ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
+						<div className="w-full max-w-xs rounded-xl bg-white p-5 shadow-xl">
+							<div className="flex flex-col items-center text-center">
+								<Image src="/LEGO-ICON_A.svg" alt="Lego icon" width={128} height={128} />
+								<div className="mt-3">
+									<p className="text-base font-medium text-slate-700">Esta lista va a ser desarmada</p>
+									<h3 className="mt-1 text-2xl text-slate-900">{deleteTarget.name}</h3>
+								</div>
+								<div className="mt-5 flex items-center gap-2">
+									<button
+										type="button"
+										onClick={confirmDeleteList}
+										disabled={deletingListId === deleteTarget.id}
+										className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+									>
+										Si
+									</button>
+									<button
+										type="button"
+										onClick={() => setDeleteTarget(null)}
+										disabled={deletingListId === deleteTarget.id}
+										className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										No
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+				) : null}
 
 				<div className="border-t border-slate-200 pt-2">
 					<button

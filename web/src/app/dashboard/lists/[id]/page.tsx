@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
+import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-category-flags";
 
 type ListInfo = {
 	id: string;
@@ -40,6 +41,12 @@ type OfferRpcRow = {
 	status: string;
 };
 
+type CatalogCategory = {
+	id: number;
+	name: string;
+	part_count: number;
+};
+
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
@@ -65,6 +72,11 @@ export default function ListDetailPage() {
 	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
 	const [message, setMessage] = useState<string | null>(null);
+	const [showCatalogModal, setShowCatalogModal] = useState(false);
+	const [catalogLoading, setCatalogLoading] = useState(false);
+	const [catalogError, setCatalogError] = useState<string | null>(null);
+	const [catalogCategories, setCatalogCategories] = useState<CatalogCategory[]>([]);
+	const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("popular");
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 
 	const totals = useMemo(() => {
@@ -102,6 +114,21 @@ export default function ListDetailPage() {
 			})
 			;
 	}, [availableColors, colorInput, useBricklinkNomenclature]);
+
+	const filteredCatalogCategories = useMemo(() => {
+		const byName = (a: CatalogCategory, b: CatalogCategory) =>
+			a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+
+		if (catalogFilter === "all") return [...catalogCategories].sort(byName);
+
+		if (catalogFilter === "popular") {
+			return catalogCategories.filter((category) => categoryMatchesFilter(category.id, "popular")).sort(byName);
+		}
+
+		return catalogCategories
+			.filter((category) => categoryMatchesFilter(category.id, catalogFilter))
+			.sort(byName);
+	}, [catalogCategories, catalogFilter]);
 
 	useEffect(() => {
 		const query = partInput.trim();
@@ -429,6 +456,36 @@ export default function ListDetailPage() {
 		}
 	}
 
+	async function openCatalogModal() {
+		setShowCatalogModal(true);
+		setCatalogError(null);
+		setCatalogFilter("popular");
+
+		if (catalogCategories.length > 0) {
+			return;
+		}
+
+		setCatalogLoading(true);
+		try {
+			const response = await fetch("/api/rebrickable/categories");
+			const payload = (await response.json()) as {
+				results?: CatalogCategory[];
+				error?: string;
+			};
+
+			if (!response.ok) {
+				setCatalogError(payload.error ?? "No se pudieron cargar categorias.");
+				return;
+			}
+
+			setCatalogCategories(payload.results ?? []);
+		} catch {
+			setCatalogError("No se pudieron cargar categorias.");
+		} finally {
+			setCatalogLoading(false);
+		}
+	}
+
 	function getColorHexFromName(colorName: string | null) {
 		if (!colorName) return "#d1d5db";
 
@@ -499,7 +556,7 @@ export default function ListDetailPage() {
 
 	if (loading) {
 		return (
-			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
 				{loadingMessage}
 			</div>
 		);
@@ -532,7 +589,16 @@ export default function ListDetailPage() {
 				</header>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
+					<div className="flex items-center justify-between gap-3">
+						<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
+						<button
+							type="button"
+							onClick={() => void openCatalogModal()}
+							className="rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a]"
+						>
+							Por Catálogo
+						</button>
+					</div>
 					<form onSubmit={createLot} className="mt-4 space-y-4">
 						<div className="relative sm:col-span-3">
 							<input
@@ -751,6 +817,80 @@ export default function ListDetailPage() {
 						</ul>
 					)}
 				</section>
+
+				{showCatalogModal ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
+						<div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+							<div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+								<div className="flex flex-wrap items-center gap-2">
+									<h3 className="mr-1 text-2xl text-slate-900">Categorias</h3>
+									<button
+										type="button"
+										onClick={() => setCatalogFilter("popular")}
+										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "popular" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+									>
+										Popular
+									</button>
+									<button
+										type="button"
+										onClick={() => setCatalogFilter("minifigs")}
+										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "minifigs" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+									>
+										Minifigs
+									</button>
+									<button
+										type="button"
+										onClick={() => setCatalogFilter("technic")}
+										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "technic" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+									>
+										Technic
+									</button>
+									<button
+										type="button"
+										onClick={() => setCatalogFilter("others")}
+										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "others" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+									>
+										Others
+									</button>
+									<button
+										type="button"
+										onClick={() => setCatalogFilter("all")}
+										className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${catalogFilter === "all" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800"}`}
+									>
+										All
+									</button>
+								</div>
+								<button
+									type="button"
+									onClick={() => setShowCatalogModal(false)}
+									className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							{catalogLoading ? <p className="mt-4 text-sm text-slate-600">Cargando categorias...</p> : null}
+							{catalogError ? <p className="mt-4 text-sm text-red-700">{catalogError}</p> : null}
+
+							{!catalogLoading && !catalogError ? (
+								<ul className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+										{filteredCatalogCategories.map((category) => (
+										<li key={category.id}>
+											<button
+												type="button"
+												disabled
+												className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-900"
+											>
+												<span className="font-medium">{category.name}</span>
+												<span className="ml-2 text-xs text-slate-500">({category.part_count} parts)</span>
+											</button>
+										</li>
+										))}
+									</ul>
+							) : null}
+						</div>
+					</div>
+				) : null}
 
 				{message ? <p className="text-sm text-slate-700">{message}</p> : null}
 			</main>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -43,6 +44,7 @@ export default function PoolPage() {
 	const [currentUserName, setCurrentUserName] = useState<string>("Usuario");
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
+	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -207,17 +209,22 @@ export default function PoolPage() {
 	const lotCards = useMemo<PoolLot[]>(() => {
 		return [...publicLots]
 			.sort((a, b) => {
+				if (sortBy === "usuario") {
+					const byOwner = (a.owner_name || "").localeCompare(b.owner_name || "", "es", { sensitivity: "base" });
+					if (byOwner !== 0) return byOwner;
+				}
+
 				const aName = (a.part_name || a.part_num).toLowerCase();
 				const bName = (b.part_name || b.part_num).toLowerCase();
-				const byName = aName.localeCompare(bName, "es", { sensitivity: "base" });
-				if (byName !== 0) return byName;
+				const byPart = aName.localeCompare(bName, "es", { sensitivity: "base" });
+				if (byPart !== 0) return byPart;
 				return a.part_num.localeCompare(b.part_num, "es", { sensitivity: "base" });
 			});
-	}, [publicLots]);
+	}, [publicLots, sortBy]);
 
 	if (loading) {
 		return (
-			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
 				{loadingMessage}
 			</div>
 		);
@@ -227,11 +234,30 @@ export default function PoolPage() {
 		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
 			<main className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
-					<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
-						← Volver
-					</Link>
-					<h1 className="mt-2 text-3xl font-semibold text-slate-900">Pool de lotes publicos</h1>
-					<p className="mt-1 text-sm text-slate-600">Lotes mezclados de todas las listas publicas, ordenados alfabeticamente.</p>
+					<div className="flex items-start justify-between gap-4">
+						<div>
+							<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+								← Volver
+							</Link>
+							<h1 className="mt-1 text-3xl font-semibold text-slate-900">Pool de lotes publicos</h1>
+
+							<div className="mt-1 flex items-center gap-2">
+								<label htmlFor="pool-sort" className="text-sm text-slate-700">
+									Ordenar por
+								</label>
+								<select
+									id="pool-sort"
+									value={sortBy}
+									onChange={(event) => setSortBy(event.target.value as "pieza" | "usuario")}
+									className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
+								>
+									<option value="pieza">Pieza</option>
+									<option value="usuario">Usuario</option>
+								</select>
+							</div>
+						</div>
+						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="shrink-0" />
+					</div>
 				</header>
 
 				{lotCards.length === 0 ? (
