@@ -33,6 +33,10 @@ h3 {
 	letter-spacing: 0.01em;
 }
 
+.font-chewy {
+	font-family: var(--font-chewy), cursive !important;
+}
+
 .quantity-input::-webkit-outer-spin-button,
 .quantity-input::-webkit-inner-spin-button {
 	opacity: 1;

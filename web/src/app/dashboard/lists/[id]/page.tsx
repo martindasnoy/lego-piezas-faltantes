@@ -27,6 +27,7 @@ type PartSuggestion = {
 };
 
 type PartImageLookup = Record<string, string | null>;
+type OfferSummaryByLot = Record<string, { offers: number; pieces: number }>;
 
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
@@ -50,6 +51,7 @@ export default function ListDetailPage() {
 	const [saving, setSaving] = useState(false);
 	const [updatingLotId, setUpdatingLotId] = useState<string | null>(null);
 	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
+	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
 	const [message, setMessage] = useState<string | null>(null);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -163,6 +165,7 @@ export default function ListDetailPage() {
 					const loadedLots = (lotRows as Lot[]) ?? [];
 					setLots(loadedLots);
 					void loadPartImages(loadedLots.map((lot) => lot.part_num));
+					void loadOffersForLots(loadedLots.map((lot) => String(lot.id)));
 				}
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir la lista.";
@@ -267,6 +270,41 @@ export default function ListDetailPage() {
 		}
 	}
 
+	async function loadOffersForLots(lotIds: string[]) {
+		if (lotIds.length === 0) {
+			setOffersByLot({});
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase
+				.from("offers")
+				.select("list_item_id,quantity,status")
+				.in("list_item_id", lotIds)
+				.in("status", ["pending", "accepted"]);
+
+			if (error) {
+				setOffersByLot({});
+				return;
+			}
+
+			const summary: OfferSummaryByLot = {};
+			for (const row of data ?? []) {
+				const key = String(row.list_item_id);
+				const current = summary[key] ?? { offers: 0, pieces: 0 };
+				summary[key] = {
+					offers: current.offers + 1,
+					pieces: current.pieces + Number(row.quantity ?? 0),
+				};
+			}
+
+			setOffersByLot(summary);
+		} catch {
+			setOffersByLot({});
+		}
+	}
+
 	async function createLot(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setSaving(true);
@@ -324,6 +362,7 @@ export default function ListDetailPage() {
 			} else {
 				void loadPartImages([partNum]);
 			}
+			void loadOffersForLots([...(lots.map((lot) => String(lot.id))), String((data as Lot).id)]);
 			setPartInput("");
 			setSelectedPart(null);
 			setSuggestions([]);
@@ -397,6 +436,11 @@ export default function ListDetailPage() {
 			}
 
 			setLots((current) => current.filter((lot) => lot.id !== lotId));
+			setOffersByLot((current) => {
+				const next = { ...current };
+				delete next[lotId];
+				return next;
+			});
 		} finally {
 			setDeletingLotId(null);
 		}
@@ -637,6 +681,11 @@ export default function ListDetailPage() {
 										>
 											Eliminar
 										</button>
+										{offersByLot[String(lot.id)] ? (
+											<p className="text-xs font-medium text-emerald-700">
+												Te ofrecen {offersByLot[String(lot.id)].pieces} piezas ({offersByLot[String(lot.id)].offers} usuarios)
+											</p>
+										) : null}
 									</div>
 								</li>
 							))}

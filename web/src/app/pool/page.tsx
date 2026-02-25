@@ -5,12 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 
-type PoolList = {
-	id: string;
-	name: string;
-	owner_id: string;
-};
-
 type PoolLot = {
 	id: string;
 	list_id: string;
@@ -18,6 +12,12 @@ type PoolLot = {
 	part_name: string | null;
 	color_name: string | null;
 	quantity: number;
+	owner_name?: string | null;
+};
+
+type RpcPoolLot = PoolLot & {
+	list_name: string | null;
+	owner_name: string | null;
 };
 
 type PartImageLookup = Record<string, string | null>;
@@ -28,6 +28,9 @@ export default function PoolPage() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
+	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
+	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 
 	useEffect(() => {
 		async function loadPool() {
@@ -42,41 +45,26 @@ export default function PoolPage() {
 					return;
 				}
 
-				const { data: listsData, error: listsError } = await supabase
-					.from("lists")
-					.select("id,name,owner_id")
-					.eq("is_public", true)
-					.order("created_at", { ascending: false });
+				setCurrentUserId(user.id);
 
-				if (listsError) {
-					setMessage("No se pudieron cargar listas publicas.");
+				const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_pool_lots");
+				if (rpcError) {
+					setMessage(`Pool no configurado: ${rpcError.message}. Ejecuta web/supabase/pool_public_rpc.sql`);
 					setPublicLots([]);
 					return;
 				}
 
-				const lists = (listsData as PoolList[]) ?? [];
+				const lots = ((rpcData as RpcPoolLot[]) ?? []).map((lot) => ({
+					id: lot.id,
+					list_id: lot.list_id,
+					part_num: lot.part_num,
+					part_name: lot.part_name,
+					color_name: lot.color_name,
+					quantity: Number(lot.quantity ?? 0),
+					owner_name: lot.owner_name,
+				}));
 
-				if (lists.length === 0) {
-					setPublicLots([]);
-					return;
-				}
-
-				const listIds = lists.map((list) => list.id);
-				const { data: lotsData, error: lotsError } = await supabase
-					.from("list_items")
-					.select("id,list_id,part_num,part_name,color_name,quantity")
-					.in("list_id", listIds)
-					.order("created_at", { ascending: false });
-
-				if (lotsError) {
-					setMessage(
-						"No se pudieron cargar lotes publicos. Revisa policy SELECT en list_items para listas publicas.",
-					);
-					setPublicLots([]);
-					return;
-				}
-
-				setPublicLots((lotsData as PoolLot[]) ?? []);
+				setPublicLots(lots);
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir el pool.";
 				setMessage(text);
@@ -87,6 +75,36 @@ export default function PoolPage() {
 
 		void loadPool();
 	}, [router]);
+
+	async function sendOffer(lot: PoolLot) {
+		if (!currentUserId) {
+			setMessage("Debes iniciar sesion para ofrecer piezas.");
+			return;
+		}
+
+		const quantity = Math.max(1, Math.floor(offerQtyByLot[lot.id] ?? 1));
+		setSendingOfferLotId(lot.id);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("offers").insert({
+				list_item_id: lot.id,
+				offered_by: currentUserId,
+				quantity,
+				status: "pending",
+			});
+
+			if (error) {
+				setMessage(`No se pudo registrar tu oferta: ${error.message}`);
+				return;
+			}
+
+			setMessage("Oferta enviada. El dueno de la lista ya la ve en su lista.");
+		} finally {
+			setSendingOfferLotId(null);
+		}
+	}
 
 	async function loadPartImages(partNums: string[]) {
 		const uniqueNums = [...new Set(partNums.map((num) => num.trim()).filter(Boolean))];
@@ -121,7 +139,7 @@ export default function PoolPage() {
 	}, [publicLots]);
 
 	const lotCards = useMemo<PoolLot[]>(() => {
-		return publicLots
+		return [...publicLots]
 			.sort((a, b) => {
 				const aName = (a.part_name || a.part_num).toLowerCase();
 				const bName = (b.part_name || b.part_num).toLowerCase();
@@ -148,29 +166,55 @@ export default function PoolPage() {
 
 				{lotCards.length === 0 ? (
 					<section className="rounded-xl border border-slate-200 p-5 text-sm text-slate-600">
-						No hay lotes publicos por ahora.
+						No hay lotes publicos por ahora. Si ya hay listas publicas, ejecuta `web/supabase/pool_rls.sql` en Supabase.
 					</section>
 				) : (
-					<section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+					<section className="space-y-2">
 						{lotCards.map((lot) => (
-							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-								<div className="flex justify-center">
+							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+								<div className="flex items-center gap-3">
 									{partImages[lot.part_num] ? (
 										<img
 											src={partImages[lot.part_num] ?? undefined}
 											alt={lot.part_name || lot.part_num}
-											className="h-24 w-24 rounded border border-slate-200 bg-white object-contain"
+											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
 										/>
 									) : (
-										<div className="h-24 w-24 rounded border border-slate-200 bg-white" />
+										<div className="h-16 w-16 rounded border border-slate-200 bg-white" />
 									)}
+
+									<p className="min-w-0 flex-1 text-sm font-medium text-slate-900">
+										<span className="block overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+											{lot.part_name || "Sin nombre"}
+										</span>
+									</p>
+
+									<p className="w-36 text-sm text-slate-700">{lot.color_name || "Sin color"}</p>
+									<p className="w-20 text-sm text-slate-700">x{lot.quantity}</p>
+									<p className="font-chewy w-44 truncate text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
+									<div className="flex items-center gap-2">
+										<input
+											type="number"
+											min={1}
+											value={offerQtyByLot[lot.id] ?? 1}
+											onChange={(event) =>
+												setOfferQtyByLot((current) => ({
+													...current,
+													[lot.id]: Math.max(1, Number(event.target.value) || 1),
+												}))
+											}
+											className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
+										/>
+										<button
+											type="button"
+											onClick={() => void sendOffer(lot)}
+											disabled={sendingOfferLotId === lot.id}
+											className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
+										>
+											Yo tengo
+										</button>
+									</div>
 								</div>
-								<p className="mt-3 overflow-hidden text-center text-sm font-medium text-slate-800 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-									{lot.part_name || "Sin nombre"}
-								</p>
-								<p className="mt-2 text-center text-xs text-slate-600">
-									Color: {lot.color_name || "Sin color"} - Cantidad: {lot.quantity}
-								</p>
 							</article>
 						))}
 					</section>
