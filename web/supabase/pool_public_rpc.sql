@@ -10,6 +10,7 @@ returns table (
   owner_id text,
   claimed_by_id text,
   claimed_by_name text,
+  claimed_status text,
   part_num text,
   part_name text,
   color_name text,
@@ -35,6 +36,7 @@ as $$
       ou.email,
       latest_offer.offered_by::text
     ) as claimed_by_name,
+    latest_offer.status as claimed_status,
     li.part_num,
     li.part_name,
     li.color_name,
@@ -49,7 +51,7 @@ as $$
   join public.lists l on l.id::text = li.list_id::text
   left join auth.users u on u.id = l.owner_id
   left join lateral (
-    select o.offered_by
+    select o.offered_by, o.status
     from public.offers o
     where o.list_item_id::text = li.id::text
       and o.status in ('pending', 'accepted')

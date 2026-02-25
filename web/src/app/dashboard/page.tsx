@@ -181,7 +181,11 @@ export default function DashboardPage() {
 	}
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
+		return (
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+				{loadingMessage}
+			</div>
+		);
 	}
 
 	return (

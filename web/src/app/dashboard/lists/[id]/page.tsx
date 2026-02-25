@@ -498,7 +498,11 @@ export default function ListDetailPage() {
 	}
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
+		return (
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+				{loadingMessage}
+			</div>
+		);
 	}
 
 	if (!list) {
@@ -733,12 +737,12 @@ export default function ListDetailPage() {
 											<button
 												type="button"
 												onClick={() => deleteLot(lot.id)}
-														disabled={deletingLotId === lot.id}
-														className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-													>
-														Eliminar
-													</button>
-												</div>
+												disabled={deletingLotId === lot.id}
+												className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+											>
+												Eliminar
+											</button>
+										</div>
 											</div>
 										</div>
 									</div>

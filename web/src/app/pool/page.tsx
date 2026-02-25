@@ -12,6 +12,7 @@ type PoolLot = {
 	owner_id: string;
 	claimed_by_id?: string | null;
 	claimed_by_name?: string | null;
+	claimed_status?: string | null;
 	part_num: string;
 	part_name: string | null;
 	color_name: string | null;
@@ -25,6 +26,11 @@ type RpcPoolLot = PoolLot & {
 };
 
 type PartImageLookup = Record<string, string | null>;
+type ToggleOfferRpcRow = {
+	action: "created" | "deleted";
+	claimed_by_id: string | null;
+	claimed_by_name: string | null;
+};
 
 export default function PoolPage() {
 	const router = useRouter();
@@ -73,6 +79,7 @@ export default function PoolPage() {
 					owner_id: lot.owner_id,
 					claimed_by_id: lot.claimed_by_id,
 					claimed_by_name: lot.claimed_by_name,
+					claimed_status: lot.claimed_status,
 					part_num: lot.part_num,
 					part_name: lot.part_name,
 					color_name: lot.color_name,
@@ -114,8 +121,13 @@ export default function PoolPage() {
 			return;
 		}
 
-		if (lot.claimed_by_id) {
+		if (lot.claimed_by_id && lot.claimed_by_id !== user.id) {
 			setMessage("Este lote ya fue marcado por otro usuario.");
+			return;
+		}
+
+		if (lot.claimed_status === "accepted") {
+			setMessage("Esta oferta ya fue aceptada y no se puede cambiar desde el pool.");
 			return;
 		}
 
@@ -124,29 +136,37 @@ export default function PoolPage() {
 		setMessage(null);
 
 		try {
-			const { error } = await supabase.rpc("create_offer_for_lot", {
+			const { data, error } = await supabase.rpc("toggle_offer_for_lot", {
 				p_list_item_id: lot.id,
 				p_quantity: quantity,
 			});
 
 			if (error) {
-				setMessage(`No se pudo registrar tu oferta: ${error.message}. Ejecuta web/supabase/offers_create_rpc.sql`);
+				setMessage(`No se pudo registrar tu oferta: ${error.message}. Ejecuta web/supabase/offers_toggle_rpc.sql`);
 				return;
 			}
+
+			const row = ((data as ToggleOfferRpcRow[]) ?? [])[0];
+			const wasDeleted = row?.action === "deleted";
 
 			setPublicLots((current) =>
 				current.map((item) =>
 					item.id === lot.id
 						? {
 								...item,
-								claimed_by_id: user.id,
-								claimed_by_name: currentUserName,
+								claimed_by_id: wasDeleted ? null : (row?.claimed_by_id ?? user.id),
+								claimed_by_name: wasDeleted ? null : (row?.claimed_by_name ?? currentUserName),
+								claimed_status: wasDeleted ? null : "pending",
 						  }
 						: item,
 				),
 			);
 
-			setMessage("Oferta enviada. El dueno de la lista ya la ve en su lista.");
+			setMessage(
+				wasDeleted
+					? "Quitaste tu Yo tengo en este lote."
+					: "Oferta enviada. El dueno de la lista ya la ve en su lista.",
+			);
 		} finally {
 			setSendingOfferLotId(null);
 		}
@@ -196,7 +216,11 @@ export default function PoolPage() {
 	}, [publicLots]);
 
 	if (loading) {
-		return <div className="min-h-screen bg-[#006eb2] p-8 text-white">{loadingMessage}</div>;
+		return (
+			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-4xl text-white sm:text-5xl">
+				{loadingMessage}
+			</div>
+		);
 	}
 
 	return (
@@ -249,13 +273,13 @@ export default function PoolPage() {
 													[lot.id]: Math.max(1, Number(event.target.value) || 1),
 												}))
 											}
-											disabled={Boolean(lot.claimed_by_id) || lot.owner_id === currentUserId}
+											disabled={(Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.owner_id === currentUserId || lot.claimed_status === "accepted"}
 											className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
 										/>
 									<button
 										type="button"
 										onClick={() => void sendOffer(lot)}
-										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || Boolean(lot.claimed_by_id)}
+										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || (Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.claimed_status === "accepted"}
 										className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
 									>
 										{lot.owner_id === currentUserId
