@@ -16,6 +16,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
    - Crea RPC para insertar oferta con usuario real (`auth.uid()`) y evita duplicados por lote.
 7. `offers_toggle_rpc.sql`
    - Permite toggle de `Yo tengo` (poner y deshacer si fue tu clic y sigue pending).
+8. `offers_mine_rpc.sql`
+   - Crea RPC para la lista automatica `Piezas ofertadas` (resumen de tus `Yo tengo`).
 
 ## Verificacion rapida
 

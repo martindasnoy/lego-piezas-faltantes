@@ -401,11 +401,13 @@ export default function DashboardPage() {
 				<section className="grid gap-4 md:grid-cols-3">
 					<div className="rounded-xl border border-slate-200 p-4 sm:p-5 md:col-span-2">
 						<h2 className="text-xl font-semibold text-slate-900">Tus listas creadas</h2>
-						{lists.length === 0 ? (
-							<p className="mt-3 text-sm text-slate-600">Todavia no creaste listas.</p>
-						) : (
-							<ul className="mt-4 space-y-3">
-								{lists.map((list) => (
+						<ul className="mt-4 space-y-3">
+							{lists.length === 0 ? (
+								<li className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+									Todavia no creaste listas.
+								</li>
+							) : (
+								lists.map((list) => (
 									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
 										<div className="flex items-start justify-between gap-3">
 											<div>
@@ -446,9 +448,20 @@ export default function DashboardPage() {
 										</div>
 										</div>
 									</li>
-								))}
-							</ul>
-						)}
+								))
+							)}
+
+							<li className="rounded-lg border border-[#007bb8] bg-[#0093DD] px-4 py-3 text-white">
+								<div className="flex items-start justify-between gap-3">
+									<div>
+										<Link href="/dashboard/offered" className="text-base font-semibold hover:underline">
+											Piezas ofertadas
+										</Link>
+										<p className="mt-1 text-xs text-white/90">Lista automatica. Resume tus "Yo tengo".</p>
+									</div>
+								</div>
+							</li>
+						</ul>
 					</div>
 
 					<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
