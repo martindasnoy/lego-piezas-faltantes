@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
 
 const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/part_categories/";
 
@@ -13,7 +14,7 @@ export async function GET() {
 	const apiKey = process.env.REBRICKABLE_API_KEY ?? "";
 
 	if (!apiKey) {
-		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
+		return NextResponse.json({ results: staticRebrickableCategories });
 	}
 
 	const url = new URL(REBRICKABLE_API_BASE);
@@ -43,6 +44,6 @@ export async function GET() {
 
 		return NextResponse.json({ results: topLevel });
 	} catch {
-		return NextResponse.json({ error: "No se pudo conectar con Rebrickable." }, { status: 500 });
+		return NextResponse.json({ results: staticRebrickableCategories });
 	}
 }
