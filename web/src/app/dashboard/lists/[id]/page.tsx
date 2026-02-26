@@ -91,7 +91,7 @@ export default function ListDetailPage() {
 	const [catalogPartsPage, setCatalogPartsPage] = useState(1);
 	const [catalogPartsTotalPages, setCatalogPartsTotalPages] = useState(1);
 	const [catalogPageInput, setCatalogPageInput] = useState("1");
-	const [catalogShowPrinted, setCatalogShowPrinted] = useState(true);
+	const [catalogShowPrinted, setCatalogShowPrinted] = useState(false);
 	const [catalogShowNonPrinted, setCatalogShowNonPrinted] = useState(true);
 	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
@@ -505,7 +505,7 @@ export default function ListDetailPage() {
 		setCatalogPartsPage(1);
 		setCatalogPartsTotalPages(1);
 		setCatalogPageInput("1");
-		setCatalogShowPrinted(true);
+		setCatalogShowPrinted(false);
 		setCatalogShowNonPrinted(true);
 		setCatalogPartsError(null);
 		setCatalogError(null);
@@ -546,7 +546,7 @@ export default function ListDetailPage() {
 		setCatalogPartsPage(1);
 		setCatalogPartsTotalPages(1);
 		setCatalogPageInput("1");
-		setCatalogShowPrinted(true);
+		setCatalogShowPrinted(false);
 		setCatalogShowNonPrinted(true);
 	}
 
@@ -1125,11 +1125,18 @@ export default function ListDetailPage() {
 										<ul className="mt-3 space-y-2">
 											{filteredCatalogCategories.map((category) => (
 												<li key={category.id}>
-													<button
-														type="button"
-														onClick={() => void openCategoryParts(category, 1)}
-														className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100"
-													>
+												<button
+													type="button"
+													onClick={() => {
+														setCatalogShowPrinted(false);
+														setCatalogShowNonPrinted(true);
+														void openCategoryParts(category, 1, {
+															includePrinted: false,
+															includeNonPrinted: true,
+														});
+													}}
+													className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100"
+												>
 														<span className="font-medium">{category.name}</span>
 														<span className="ml-2 text-xs text-slate-500">({category.part_count} parts)</span>
 													</button>
