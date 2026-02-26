@@ -37,6 +37,16 @@ npm run deploy
 # or similar package manager command
 ```
 
+### Secrets and environment variables
+
+- Do not commit secrets in `wrangler.toml`.
+- Keep `REBRICKABLE_API_KEY` and `REBRICKABLE_PREWARM_TOKEN` as Cloudflare Worker secrets.
+- If you deploy from GitHub Actions, set these repository secrets:
+  - `CF_API_TOKEN`
+  - `CF_ACCOUNT_ID`
+  - `REBRICKABLE_API_KEY`
+  - `REBRICKABLE_PREWARM_TOKEN`
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

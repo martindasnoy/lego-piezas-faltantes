@@ -8,6 +8,4 @@ directory = ".open-next/assets"
 binding = "ASSETS"
 
 [vars]
-NEXTJS_ENV = "development"
-REBRICKABLE_API_KEY=baff40198c224169b3c860f9fe2292ad
-REBRICKABLE_PREWARM_TOKEN=w8FvP9m2Qk7Zx1Tn4Lr6Yp3Hs0Da5Bc8
+NEXTJS_ENV = "production"
