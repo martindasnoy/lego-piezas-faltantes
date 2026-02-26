@@ -711,27 +711,32 @@ export default function ListDetailPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
-			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
+		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
-					<div className="flex items-start justify-between gap-3">
-						<h1 className="text-3xl font-semibold text-slate-900">Lista {list.name.toLocaleUpperCase("es-AR")}</h1>
-						<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+						<Link href="/dashboard" className="order-1 self-end text-sm text-slate-600 hover:underline sm:order-2 sm:self-auto">
 							← Volver
 						</Link>
+						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Lista {list.name.toLocaleUpperCase("es-AR")}</h1>
 					</div>
 					<p className="mt-1 text-sm text-slate-600">
-						Visibilidad: {list.is_public ? "Publica" : "Privada"} - Lotes: {totals.lots} - Piezas: {totals.pieces}
+						<span className="sm:hidden">
+							Visibilidad: {list.is_public ? "Publica" : "Privada"} - L: {totals.lots} - P: {totals.pieces}
+						</span>
+						<span className="hidden sm:inline">
+							Visibilidad: {list.is_public ? "Publica" : "Privada"} - Lotes: {totals.lots} - Piezas: {totals.pieces}
+						</span>
 					</p>
 				</header>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<div className="flex items-center justify-between gap-3">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 						<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
 						<button
 							type="button"
 							onClick={() => void openCatalogModal()}
-							className="rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a]"
+							className="w-full rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a] sm:w-auto"
 						>
 							Por Catálogo
 						</button>
@@ -896,11 +901,11 @@ export default function ListDetailPage() {
 
 										<div className="min-w-0 flex-1">
 											<div className="flex items-start justify-between gap-2">
-												<p className="max-w-[520px] overflow-hidden text-slate-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+												<p className="overflow-hidden text-slate-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] sm:max-w-[520px]">
 													{lot.part_name || "Sin nombre"}
 												</p>
 												<div
-													className={`shrink-0 rounded-md px-3 py-1 text-xs ${offersByLot[String(lot.id)] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}
+													className={`w-fit max-w-full rounded-md px-3 py-1 text-xs ${offersByLot[String(lot.id)] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}
 												>
 													{offersByLot[String(lot.id)]
 														? offersByLot[String(lot.id)].byUser
@@ -932,7 +937,7 @@ export default function ListDetailPage() {
 													void persistLotQuantity(lot.id, Number.isFinite(parsed) ? parsed : lot.quantity);
 												}}
 												disabled={updatingLotId === lot.id}
-												className="quantity-input w-16 appearance-auto rounded border border-slate-300 px-2 py-1 text-center text-sm disabled:opacity-50"
+												className="quantity-input w-10 appearance-auto rounded border border-slate-300 px-1 py-0.5 text-center text-xs disabled:opacity-50 sm:w-16 sm:px-2 sm:py-1 sm:text-sm"
 											/>
 										</div>
 
@@ -941,12 +946,16 @@ export default function ListDetailPage() {
 												type="button"
 												onClick={() => deleteLot(lot.id)}
 												disabled={deletingLotId === lot.id}
-												className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+												className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 sm:px-3"
 											>
-												Eliminar
+												<span className="sm:hidden" aria-hidden="true">
+													🗑
+												</span>
+												<span className="hidden sm:inline">Eliminar</span>
 											</button>
 										</div>
-											</div>
+										</div>
+
 										</div>
 									</div>
 								</li>
@@ -956,8 +965,8 @@ export default function ListDetailPage() {
 				</section>
 
 				{showCatalogModal ? (
-					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
-						<div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+					<div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-900/45 p-0 sm:items-center sm:p-4">
+						<div className="flex h-[100dvh] w-full flex-col bg-white p-4 shadow-xl sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-xl sm:p-5">
 							<div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
 								{catalogView === "categories" ? (
 									<div className="flex flex-wrap items-center gap-2">
@@ -1106,13 +1115,14 @@ export default function ListDetailPage() {
 								</div>
 							</div>
 
+							<div className="min-h-0 flex-1 overflow-y-auto pr-1">
 							{catalogView === "categories" ? (
 								<>
 									{catalogLoading ? <p className="mt-4 text-sm text-slate-600">Cargando categorias...</p> : null}
 									{catalogError ? <p className="mt-4 text-sm text-red-700">{catalogError}</p> : null}
 
 									{!catalogLoading && !catalogError ? (
-										<ul className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+										<ul className="mt-3 space-y-2">
 											{filteredCatalogCategories.map((category) => (
 												<li key={category.id}>
 													<button
@@ -1172,6 +1182,7 @@ export default function ListDetailPage() {
 									) : null}
 								</>
 							)}
+							</div>
 						</div>
 					</div>
 				) : null}

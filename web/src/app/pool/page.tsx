@@ -231,17 +231,25 @@ export default function PoolPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
-			<main className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
+		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+			<main className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
-					<div className="flex items-start justify-between gap-4">
+					<div className="flex flex-col gap-0 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
 						<div>
-							<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
-								← Volver
-							</Link>
-							<h1 className="mt-1 text-3xl font-semibold text-slate-900">Pool de lotes publicos</h1>
+							<div className="flex justify-start">
+								<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+									← Volver
+								</Link>
+							</div>
+							<div className="mt-0 flex items-start justify-between gap-2">
+								<h1 className="text-3xl font-semibold text-slate-900">
+									<span className="sm:hidden">Pool de lotes</span>
+									<span className="hidden sm:inline">Pool de lotes publicos</span>
+								</h1>
+								<Image src="/pool-logo.svg" alt="Pool" width={72} height={20} className="shrink-0 sm:hidden" />
+							</div>
 
-							<div className="mt-1 flex items-center gap-2">
+							<div className="-mt-6 flex items-center gap-2 sm:mt-0">
 								<label htmlFor="pool-sort" className="text-sm text-slate-700">
 									Ordenar por
 								</label>
@@ -256,7 +264,7 @@ export default function PoolPage() {
 								</select>
 							</div>
 						</div>
-						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="shrink-0" />
+						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />
 					</div>
 				</header>
 
@@ -268,52 +276,65 @@ export default function PoolPage() {
 					<section className="space-y-2">
 						{lotCards.map((lot) => (
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-								<div className="flex items-center gap-3">
-									{partImages[lot.part_num] ? (
-										<img
-											src={partImages[lot.part_num] ?? undefined}
-											alt={lot.part_name || lot.part_num}
-											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-										/>
-									) : (
-										<div className="h-16 w-16 rounded border border-slate-200 bg-white" />
-									)}
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
+										{partImages[lot.part_num] ? (
+											<img
+												src={partImages[lot.part_num] ?? undefined}
+												alt={lot.part_name || lot.part_num}
+												className="h-20 w-20 rounded border border-slate-200 bg-white object-contain sm:h-16 sm:w-16"
+											/>
+										) : (
+											<div className="h-20 w-20 rounded border border-slate-200 bg-white sm:h-16 sm:w-16" />
+										)}
 
-									<p className="min-w-0 flex-1 text-sm font-medium text-slate-900">
-										<span className="block overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-											{lot.part_name || "Sin nombre"}
-										</span>
-									</p>
-
-									<p className="w-36 text-sm text-slate-700">{lot.color_name || "Sin color"}</p>
-									<p className="w-20 text-sm text-slate-700">x{lot.quantity}</p>
-									<p className="font-chewy w-44 truncate text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
-									<div className="flex items-center gap-2">
-										<input
-											type="number"
-											min={1}
-											value={offerQtyByLot[lot.id] ?? 1}
-											onChange={(event) =>
-												setOfferQtyByLot((current) => ({
-													...current,
-													[lot.id]: Math.max(1, Number(event.target.value) || 1),
-												}))
-											}
-											disabled={(Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.owner_id === currentUserId || lot.claimed_status === "accepted"}
-											className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
-										/>
-									<button
-										type="button"
-										onClick={() => void sendOffer(lot)}
-										disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || (Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.claimed_status === "accepted"}
-										className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
-									>
-										{lot.owner_id === currentUserId
-											? "Tu lote"
-											: lot.claimed_by_name?.trim() || (lot.claimed_by_id ? "Reservado" : "Yo tengo")}
-									</button>
+										<div className="min-w-0 flex-1">
+											<p className="text-sm font-medium text-slate-900">
+												<span className="block overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] sm:[-webkit-line-clamp:2]">
+													{lot.part_name || "Sin nombre"}
+												</span>
+											</p>
+										<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:hidden">
+											<p>{lot.color_name || "Sin color"}</p>
+											<p>x{lot.quantity}</p>
+										</div>
+											<div className="mt-1 hidden flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:flex">
+												<p>{lot.color_name || "Sin color"}</p>
+												<p>x{lot.quantity}</p>
+												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
+											</div>
+										</div>
 									</div>
-								</div>
+
+									<div className="mt-1 flex w-full items-center justify-between gap-2 sm:ml-auto sm:mt-0 sm:w-auto sm:justify-end">
+										<p className="font-chewy min-w-0 truncate text-base text-slate-600 sm:hidden">{lot.owner_name || "Desconocido"}</p>
+										<div className="flex items-center gap-2">
+											<input
+												type="number"
+												min={1}
+												value={offerQtyByLot[lot.id] ?? 1}
+												onChange={(event) =>
+													setOfferQtyByLot((current) => ({
+														...current,
+														[lot.id]: Math.max(1, Number(event.target.value) || 1),
+													}))
+												}
+												disabled={(Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.owner_id === currentUserId || lot.claimed_status === "accepted"}
+												className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
+											/>
+											<button
+												type="button"
+												onClick={() => void sendOffer(lot)}
+												disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || (Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.claimed_status === "accepted"}
+												className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
+											>
+												{lot.owner_id === currentUserId
+													? "Tu lote"
+													: lot.claimed_by_name?.trim() || (lot.claimed_by_id ? "Reservado" : "Yo tengo")}
+											</button>
+										</div>
+									</div>
+									</div>
 							</article>
 						))}
 					</section>

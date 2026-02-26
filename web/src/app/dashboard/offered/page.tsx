@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
+import { gobrickColors } from "@/lib/gobrick-colors";
 
 type OfferedRow = {
 	list_item_id: string;
@@ -85,6 +86,13 @@ export default function OfferedPage() {
 			.map(([ownerName, data]) => ({ ownerName, ...data }));
 	}, [rows]);
 
+	function getColorHexFromName(colorName: string | null) {
+		if (!colorName) return "#d1d5db";
+		const normalized = colorName.replace("(Chino)", "").trim().toLowerCase();
+		const match = gobrickColors.find((color) => color.name.toLowerCase() === normalized || (color.blName ?? "").trim().toLowerCase() === normalized);
+		return match?.hex ?? "#d1d5db";
+	}
+
 	if (loading) {
 		return (
 			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
@@ -94,21 +102,20 @@ export default function OfferedPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
-			<main className="mx-auto flex w-full max-w-4xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
+		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+			<main className="mx-auto flex w-full max-w-4xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
-					<div className="flex items-start justify-between gap-3">
-						<h1 className="text-3xl font-semibold text-slate-900">Piezas ofertadas</h1>
-						<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+						<Link href="/dashboard" className="order-1 self-end text-sm text-slate-600 hover:underline sm:order-2 sm:self-auto">
 							← Volver
 						</Link>
+						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Piezas ofertadas</h1>
 					</div>
-					<p className="mt-1 text-sm text-slate-600">Lista automatica: resume todo lo que marcaste con "Yo tengo".</p>
 					<p className="mt-1 text-sm text-slate-600">Lotes: {totals.lots} - Piezas: {totals.pieces}</p>
 				</header>
 
 				<section className="rounded-xl border border-[#007bb8] bg-[#0093DD] p-4 text-white">
-					<p className="text-sm">Esta lista es especial y no permite agregar items manualmente.</p>
+					<p className="text-sm">Este es el resumen de las piezas que ofreciste a otros miembros de Balug. Gracias por sumar a la comunidad!</p>
 				</section>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
@@ -129,12 +136,22 @@ export default function OfferedPage() {
 													<div>
 														<p className="font-semibold text-slate-900">{row.part_name}</p>
 														<p className="text-slate-600">
-															#{row.part_num} - {row.color_name || "Sin color"}
+															<span className="ml-1 inline-flex items-center gap-1">
+																<span
+																	className="inline-block h-3 w-3 rounded border border-slate-300"
+																	style={{ backgroundColor: getColorHexFromName(row.color_name) }}
+																	title={row.color_name || "Sin color"}
+																/>
+																{row.color_name || "Sin color"}
+															</span>
 														</p>
 													</div>
-													<div className="text-right">
-														<p className="font-semibold text-slate-900">x{row.total_quantity}</p>
-														<p className="text-xs text-slate-600">Estado: {row.last_status}</p>
+													<div className="w-full sm:w-auto sm:text-right">
+														<p className="hidden font-semibold text-slate-900 sm:block">x{row.total_quantity}</p>
+														<div className="mt-1 flex items-center justify-between sm:block sm:text-right">
+															<p className="font-semibold text-slate-900 sm:hidden">x{row.total_quantity}</p>
+															<p className="text-xs text-slate-600">Estado: {row.last_status}</p>
+														</div>
 													</div>
 												</div>
 											</li>

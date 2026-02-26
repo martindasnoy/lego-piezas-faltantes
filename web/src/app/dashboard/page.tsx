@@ -340,12 +340,12 @@ export default function DashboardPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-6 py-8">
-			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
+		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
 					<div>
 						<div className="flex items-center gap-2">
-							<h1 className="text-4xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
+							<h1 className="break-all text-3xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
 							<button
 								type="button"
 								onClick={openUserSettings}
@@ -375,7 +375,7 @@ export default function DashboardPage() {
 							/>
 						</div>
 
-						<div className="flex items-center justify-between gap-3 pr-2">
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:pr-2">
 							<label className="flex items-center gap-2 text-sm text-slate-700">
 								<input
 									type="checkbox"
@@ -389,7 +389,7 @@ export default function DashboardPage() {
 							<button
 								type="submit"
 								disabled={saving}
-								className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+								className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
 							>
 								{saving ? "Guardando..." : "Crear lista"}
 							</button>
@@ -408,42 +408,45 @@ export default function DashboardPage() {
 							) : (
 								lists.map((list) => (
 									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-										<div className="flex items-start justify-between gap-3">
+										<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 											<div>
 												<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
 													{list.name}
 												</Link>
 												<p className="mt-1 text-xs text-slate-500">
-													Lotes: {list.lots_count} - Piezas: {list.pieces_count}
+													<span className="sm:hidden">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
+													<span className="hidden sm:inline">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
 												</p>
 											</div>
-										<div className="flex flex-col items-end gap-2">
-											<div className="flex flex-wrap justify-end gap-2">
+										<div className="w-full md:w-auto">
+											<div className="flex flex-wrap items-center justify-between gap-2 md:flex-col md:items-end md:justify-start">
+												<div className="flex items-center gap-2">
+													<button
+														type="button"
+														onClick={() => switchVisibility(list.id, false)}
+														disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
+														className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+													>
+														Privado
+													</button>
+													<button
+														type="button"
+														onClick={() => switchVisibility(list.id, true)}
+														disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
+														className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+													>
+														Publico
+													</button>
+												</div>
 												<button
 													type="button"
-													onClick={() => switchVisibility(list.id, false)}
-													disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
-													className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+													onClick={() => setDeleteTarget(list)}
+													disabled={switchingId === list.id || deletingListId === list.id}
+													className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
 												>
-													Privado
-												</button>
-												<button
-													type="button"
-													onClick={() => switchVisibility(list.id, true)}
-													disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
-													className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-												>
-													Publico
+													Eliminar lista
 												</button>
 											</div>
-											<button
-												type="button"
-												onClick={() => setDeleteTarget(list)}
-												disabled={switchingId === list.id || deletingListId === list.id}
-												className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-											>
-												Eliminar lista
-											</button>
 										</div>
 										</div>
 									</li>
