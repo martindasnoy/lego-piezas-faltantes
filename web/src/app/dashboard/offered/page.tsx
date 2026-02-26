@@ -93,6 +93,13 @@ export default function OfferedPage() {
 		return match?.hex ?? "#d1d5db";
 	}
 
+	function getStatusLabel(status: OfferedRow["last_status"]) {
+		if (status === "accepted") return "Aceptada";
+		if (status === "rejected") return "Rechazada";
+		if (status === "pending") return "Pendiente";
+		return status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : "Sin estado";
+	}
+
 	if (loading) {
 		return (
 			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
@@ -132,7 +139,7 @@ export default function OfferedPage() {
 									<ul className="space-y-2 p-3">
 										{group.rows.map((row) => (
 											<li key={row.list_item_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-												<div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+												<div className="flex flex-wrap items-start justify-between gap-2 text-sm sm:items-center">
 													<div>
 														<p className="font-semibold text-slate-900">{row.part_name}</p>
 														<p className="text-slate-600">
@@ -150,7 +157,7 @@ export default function OfferedPage() {
 														<p className="hidden font-semibold text-slate-900 sm:block">x{row.total_quantity}</p>
 														<div className="mt-1 flex items-center justify-between sm:block sm:text-right">
 															<p className="font-semibold text-slate-900 sm:hidden">x{row.total_quantity}</p>
-															<p className="text-xs text-slate-600">Estado: {row.last_status}</p>
+															<p className="text-xs text-slate-600">Estado: {getStatusLabel(row.last_status)}</p>
 														</div>
 													</div>
 												</div>

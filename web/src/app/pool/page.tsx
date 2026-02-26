@@ -61,7 +61,7 @@ export default function PoolPage() {
 					return;
 				}
 
-				setCurrentUserId(user.id);
+			setCurrentUserId(user.id);
 			setCurrentUserName(
 				(user.user_metadata?.display_name as string) ||
 					(user.user_metadata?.full_name as string) ||
@@ -249,7 +249,7 @@ export default function PoolPage() {
 								<Image src="/pool-logo.svg" alt="Pool" width={72} height={20} className="shrink-0 sm:hidden" />
 							</div>
 
-							<div className="-mt-6 flex items-center gap-2 sm:mt-0">
+							<div className="mt-1 flex items-center gap-2 sm:mt-0">
 								<label htmlFor="pool-sort" className="text-sm text-slate-700">
 									Ordenar por
 								</label>
@@ -276,7 +276,7 @@ export default function PoolPage() {
 					<section className="space-y-2">
 						{lotCards.map((lot) => (
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-								<div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
 										{partImages[lot.part_num] ? (
 											<img
@@ -294,10 +294,11 @@ export default function PoolPage() {
 													{lot.part_name || "Sin nombre"}
 												</span>
 											</p>
-										<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:hidden">
-											<p>{lot.color_name || "Sin color"}</p>
-											<p>x{lot.quantity}</p>
-										</div>
+											<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-700 sm:hidden">
+												<p>{lot.color_name || "Sin color"}</p>
+												<p>x{lot.quantity}</p>
+												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
+											</div>
 											<div className="mt-1 hidden flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:flex">
 												<p>{lot.color_name || "Sin color"}</p>
 												<p>x{lot.quantity}</p>
@@ -306,8 +307,7 @@ export default function PoolPage() {
 										</div>
 									</div>
 
-									<div className="mt-1 flex w-full items-center justify-between gap-2 sm:ml-auto sm:mt-0 sm:w-auto sm:justify-end">
-										<p className="font-chewy min-w-0 truncate text-base text-slate-600 sm:hidden">{lot.owner_name || "Desconocido"}</p>
+									<div className="mt-1 flex w-full items-center justify-end gap-2 sm:ml-3 sm:mt-0 sm:w-auto">
 										<div className="flex items-center gap-2">
 											<input
 												type="number"
@@ -334,7 +334,7 @@ export default function PoolPage() {
 											</button>
 										</div>
 									</div>
-									</div>
+								</div>
 							</article>
 						))}
 					</section>

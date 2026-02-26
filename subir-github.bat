@@ -1,57 +1,32 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
-cd /d "%~dp0"
+cd /d "%~dp0" || exit /b 1
 
 git rev-parse --is-inside-work-tree >nul 2>&1
-if errorlevel 1 (
-  echo ERROR: Esta carpeta no es un repo git.
-  pause
-  exit /b 1
-)
+if errorlevel 1 exit /b 1
 
 set "MSG=%*"
 if "%MSG%"=="" (
-  set /p MSG=Mensaje de commit: 
+  for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format \"yyyy-MM-dd HH:mm\""') do set "NOW=%%i"
+  if not defined NOW set "NOW=%date% %time:~0,5%"
+  set "MSG=auto: %NOW%"
 )
 
-if "%MSG%"=="" (
-  set "MSG=update rapido"
-)
-
-echo.
-echo Agregando cambios...
 git add -A
 
 git diff --cached --quiet
-if not errorlevel 1 (
-  echo No hay cambios para commitear.
-  pause
-  exit /b 0
-)
+if %errorlevel%==0 exit /b 0
 
-echo.
-echo Commit: %MSG%
 git commit -m "%MSG%"
-if errorlevel 1 (
-  echo.
-  echo ERROR: No se pudo crear el commit.
-  pause
-  exit /b 1
-)
+if errorlevel 1 exit /b 1
 
-echo.
-echo Subiendo a GitHub...
 git push
 if errorlevel 1 (
-  echo.
-  echo ERROR: No se pudo hacer push.
-  pause
-  exit /b 1
+  for /f %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
+  if not defined BRANCH exit /b 1
+  git push -u origin "%BRANCH%"
+  if errorlevel 1 exit /b 1
 )
 
-echo.
-echo Listo: cambios subidos.
-git status -sb
-echo.
-pause
+exit /b 0

@@ -1,0 +1,6 @@
+# Load .env.development* files when running `wrangler dev`
+NEXTJS_ENV=development
+
+# Required for Rebrickable endpoints used by catalog and prewarm
+REBRICKABLE_API_KEY=
+REBRICKABLE_PREWARM_TOKEN=

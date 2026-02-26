@@ -1,0 +1,11 @@
+name = "lego-piezas-faltantes"
+main = ".open-next/worker.js"
+compatibility_date = "2026-02-26"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+[vars]
+NEXTJS_ENV = "development"
