@@ -3,42 +3,55 @@ setlocal
 
 cd /d "%~dp0"
 
-for /f "delims=" %%i in ('git rev-parse --is-inside-work-tree 2^>nul') do set INSIDE_REPO=%%i
-if /i not "%INSIDE_REPO%"=="true" (
-  echo [ERROR] Esta carpeta no es un repositorio git.
+git rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: Esta carpeta no es un repo git.
+  pause
   exit /b 1
 )
 
-set "COMMIT_MSG=%*"
-if "%COMMIT_MSG%"=="" set "COMMIT_MSG=update %date% %time%"
+set "MSG=%*"
+if "%MSG%"=="" (
+  set /p MSG=Mensaje de commit: 
+)
+
+if "%MSG%"=="" (
+  set "MSG=update rapido"
+)
 
 echo.
-echo [1/4] Agregando cambios...
+echo Agregando cambios...
 git add -A
-if errorlevel 1 (
-  echo [ERROR] Fallo git add.
-  exit /b 1
-)
 
 git diff --cached --quiet
-if %errorlevel%==0 (
-  echo [INFO] No hay cambios para subir.
+if not errorlevel 1 (
+  echo No hay cambios para commitear.
+  pause
   exit /b 0
 )
 
-echo [2/4] Creando commit...
-git commit -m "%COMMIT_MSG%"
+echo.
+echo Commit: %MSG%
+git commit -m "%MSG%"
 if errorlevel 1 (
-  echo [ERROR] Fallo git commit.
+  echo.
+  echo ERROR: No se pudo crear el commit.
+  pause
   exit /b 1
 )
 
-echo [3/4] Subiendo a GitHub (main)...
-git push origin main
+echo.
+echo Subiendo a GitHub...
+git push
 if errorlevel 1 (
-  echo [ERROR] Fallo git push.
+  echo.
+  echo ERROR: No se pudo hacer push.
+  pause
   exit /b 1
 )
 
-echo [4/4] Listo. Cambios subidos correctamente.
-exit /b 0
+echo.
+echo Listo: cambios subidos.
+git status -sb
+echo.
+pause
