@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
+import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
 const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/part_categories/";
 
@@ -11,7 +12,7 @@ type RebrickableCategory = {
 };
 
 export async function GET() {
-	const apiKey = process.env.REBRICKABLE_API_KEY ?? "";
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 
 	if (!apiKey) {
 		return NextResponse.json({ results: staticRebrickableCategories });

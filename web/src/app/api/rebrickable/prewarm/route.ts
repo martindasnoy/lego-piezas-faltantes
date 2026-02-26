@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
 import { getCachedCategoryParts } from "@/lib/rebrickable-parts-cache";
+import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
 export async function POST(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const categoryId = (searchParams.get("category_id") ?? "").trim();
 	const token = request.headers.get("x-prewarm-token") ?? "";
-	const configuredToken = process.env.REBRICKABLE_PREWARM_TOKEN ?? "";
-	const apiKey = process.env.REBRICKABLE_API_KEY ?? "";
+	const configuredToken = getRuntimeEnvValue("REBRICKABLE_PREWARM_TOKEN");
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 
 	if (!apiKey) {
 		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
@@ -32,8 +33,8 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const token = request.headers.get("x-prewarm-token") ?? "";
-	const configuredToken = process.env.REBRICKABLE_PREWARM_TOKEN ?? "";
-	const apiKey = process.env.REBRICKABLE_API_KEY ?? "";
+	const configuredToken = getRuntimeEnvValue("REBRICKABLE_PREWARM_TOKEN");
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 	const onlyList = searchParams.get("list") === "1";
 
 	if (configuredToken && token !== configuredToken) {

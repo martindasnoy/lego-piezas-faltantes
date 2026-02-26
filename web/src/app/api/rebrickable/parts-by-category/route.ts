@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedCategoryParts } from "@/lib/rebrickable-parts-cache";
+import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
 export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
@@ -8,7 +9,7 @@ export async function GET(request: Request) {
 	const pageSize = Math.max(1, Math.min(20, Number(searchParams.get("page_size") ?? "20") || 20));
 	const includePrinted = (searchParams.get("include_printed") ?? "true") !== "false";
 	const includeNonPrinted = (searchParams.get("include_non_printed") ?? "true") !== "false";
-	const apiKey = process.env.REBRICKABLE_API_KEY ?? "";
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 
 	if (!apiKey) {
 		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });

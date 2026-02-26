@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
 const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const fallbackApiKey = "";
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const rawQuery = (searchParams.get("q") ?? "").trim();
 	const query = rawQuery.trim();
-	const apiKey = process.env.REBRICKABLE_API_KEY || fallbackApiKey;
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY") || fallbackApiKey;
 
 	if (!apiKey) {
 		return NextResponse.json(
