@@ -358,7 +358,6 @@ export default function DashboardPage() {
 								</svg>
 							</button>
 						</div>
-						<p className="text-sm text-slate-500">Email: {userEmail}</p>
 					</div>
 				</header>
 
