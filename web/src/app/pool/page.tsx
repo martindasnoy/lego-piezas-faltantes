@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
@@ -12,13 +12,14 @@ type PoolLot = {
 	id: string;
 	list_id: string;
 	owner_id: string;
-	claimed_by_id?: string | null;
-	claimed_by_name?: string | null;
-	claimed_status?: string | null;
 	part_num: string;
 	part_name: string | null;
 	color_name: string | null;
 	quantity: number;
+	total_offered: number;
+	remaining_quantity: number;
+	offers_count: number;
+	my_pending_quantity: number;
 	owner_name?: string | null;
 };
 
@@ -30,9 +31,12 @@ type RpcPoolLot = PoolLot & {
 type PartImageLookup = Record<string, string | null>;
 type PartImageRequestItem = { part_num: string; color_name?: string | null };
 type ToggleOfferRpcRow = {
-	action: "created" | "deleted";
-	claimed_by_id: string | null;
-	claimed_by_name: string | null;
+	action: "created" | "updated" | "deleted";
+	applied_quantity: number;
+	total_offered: number;
+	remaining_quantity: number;
+	offers_count: number;
+	my_pending_quantity: number;
 };
 
 export default function PoolPage() {
@@ -47,6 +51,7 @@ export default function PoolPage() {
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
+	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -70,6 +75,7 @@ export default function PoolPage() {
 					(user.email?.split("@")[0] ?? "Usuario"),
 			);
 
+
 				const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_pool_lots");
 				if (rpcError) {
 					setMessage(`Pool no configurado: ${rpcError.message}. Ejecuta scripts segun web/supabase/README.md`);
@@ -81,17 +87,25 @@ export default function PoolPage() {
 					id: lot.id,
 					list_id: lot.list_id,
 					owner_id: lot.owner_id,
-					claimed_by_id: lot.claimed_by_id,
-					claimed_by_name: lot.claimed_by_name,
-					claimed_status: lot.claimed_status,
 					part_num: lot.part_num,
 					part_name: lot.part_name,
 					color_name: lot.color_name,
 					quantity: Number(lot.quantity ?? 0),
+					total_offered: Number(lot.total_offered ?? 0),
+					remaining_quantity: Number(lot.remaining_quantity ?? 0),
+					offers_count: Number(lot.offers_count ?? 0),
+					my_pending_quantity: Number(lot.my_pending_quantity ?? 0),
 					owner_name: lot.owner_name,
 				}));
 
 				setPublicLots(lots);
+				setOfferQtyByLot((current) => {
+					const next = { ...current };
+					for (const item of lots) {
+						next[item.id] = item.my_pending_quantity > 0 ? item.my_pending_quantity : (next[item.id] ?? 1);
+					}
+					return next;
+				});
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir el pool.";
 				setMessage(text);
@@ -109,7 +123,7 @@ export default function PoolPage() {
 		return () => window.clearInterval(intervalId);
 	}, [router]);
 
-	async function sendOffer(lot: PoolLot) {
+	async function sendOffer(lot: PoolLot, options?: { remove?: boolean }) {
 		const supabase = getSupabaseClient();
 		const {
 			data: { user },
@@ -125,17 +139,13 @@ export default function PoolPage() {
 			return;
 		}
 
-		if (lot.claimed_by_id && lot.claimed_by_id !== user.id) {
-			setMessage("Este lote ya fue marcado por otro usuario.");
+		if (lot.remaining_quantity <= 0 && lot.my_pending_quantity <= 0) {
+			setMessage("Este lote ya esta completo.");
 			return;
 		}
 
-		if (lot.claimed_status === "accepted") {
-			setMessage("Esta oferta ya fue aceptada y no se puede cambiar desde el pool.");
-			return;
-		}
-
-		const quantity = Math.max(1, Math.floor(offerQtyByLot[lot.id] ?? 1));
+		const maxOffer = Math.max(1, lot.remaining_quantity + lot.my_pending_quantity);
+		const quantity = options?.remove ? 0 : Math.min(maxOffer, Math.max(1, Math.floor(offerQtyByLot[lot.id] ?? 1)));
 		setSendingOfferLotId(lot.id);
 		setMessage(null);
 
@@ -151,26 +161,33 @@ export default function PoolPage() {
 			}
 
 			const row = ((data as ToggleOfferRpcRow[]) ?? [])[0];
-			const wasDeleted = row?.action === "deleted";
-
-			setPublicLots((current) =>
-				current.map((item) =>
-					item.id === lot.id
-						? {
-								...item,
-								claimed_by_id: wasDeleted ? null : (row?.claimed_by_id ?? user.id),
-								claimed_by_name: wasDeleted ? null : (row?.claimed_by_name ?? currentUserName),
-								claimed_status: wasDeleted ? null : "pending",
-						  }
-						: item,
-				),
-			);
+			if (row) {
+				setPublicLots((current) =>
+					current.map((item) =>
+						item.id === lot.id
+							? {
+									...item,
+									total_offered: Number(row.total_offered ?? item.total_offered),
+									remaining_quantity: Number(row.remaining_quantity ?? item.remaining_quantity),
+									offers_count: Number(row.offers_count ?? item.offers_count),
+									my_pending_quantity: Number(row.my_pending_quantity ?? item.my_pending_quantity),
+							  }
+							: item,
+					),
+				);
+			}
 
 			setMessage(
-				wasDeleted
-					? "Quitaste tu Yo tengo en este lote."
+				row?.action === "deleted"
+					? "Quitaste tu oferta en este lote."
+					: row?.action === "updated"
+					? "Actualizaste tu cantidad ofrecida."
 					: "Oferta enviada. El dueno de la lista ya la ve en su lista.",
 			);
+			setOfferQtyByLot((current) => ({
+				...current,
+				[lot.id]: Number(row?.my_pending_quantity ?? 1) > 0 ? Number(row?.my_pending_quantity ?? 1) : 1,
+			}));
 		} finally {
 			setSendingOfferLotId(null);
 		}
@@ -204,34 +221,56 @@ export default function PoolPage() {
 		}
 
 		const missingItems = [...uniqueByKey.entries()]
-			.filter(([key]) => !(key in partImages))
+			.filter(([key]) => !(key in partImages) && !imageRequestInFlightRef.current.has(key))
 			.map(([, item]) => item);
 
 		if (missingItems.length === 0) return;
 
-		try {
-			const response = await fetch("/api/rebrickable/part-images", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ items: missingItems }),
-			});
-			if (!response.ok) return;
+		const chunkSize = 100;
+		for (let index = 0; index < missingItems.length; index += chunkSize) {
+			const chunk = missingItems.slice(index, index + chunkSize);
+			const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
+			for (const key of requestedKeys) imageRequestInFlightRef.current.add(key);
 
-			const payload = (await response.json()) as {
-				results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
-			};
+			try {
+				const response = await fetch("/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ items: chunk }),
+				});
+				if (!response.ok) {
+					setPartImages((current) => {
+						const next = { ...current };
+						for (const key of requestedKeys) next[key] = null;
+						return next;
+					});
+					continue;
+				}
 
-			const additions: PartImageLookup = {};
-			for (const part of payload.results ?? []) {
-				if (!part.key) continue;
-				additions[part.key] = part.part_img_url;
-			}
+				const payload = (await response.json()) as {
+					results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
+				};
 
-			if (Object.keys(additions).length > 0) {
+				const additions: PartImageLookup = {};
+				for (const part of payload.results ?? []) {
+					if (!part.key) continue;
+					additions[part.key] = part.part_img_url;
+				}
+
+				for (const key of requestedKeys) {
+					if (!(key in additions)) additions[key] = null;
+				}
+
 				setPartImages((current) => ({ ...current, ...additions }));
+			} catch {
+				setPartImages((current) => {
+					const next = { ...current };
+					for (const key of requestedKeys) next[key] = null;
+					return next;
+				});
+			} finally {
+				for (const key of requestedKeys) imageRequestInFlightRef.current.delete(key);
 			}
-		} catch {
-			// No bloquea render del pool
 		}
 	}
 
@@ -297,10 +336,13 @@ export default function PoolPage() {
 								</Link>
 							</div>
 							<div className="mt-0 flex items-start justify-between gap-2">
-								<h1 className="text-3xl font-semibold text-slate-900">
-									<span className="sm:hidden">Pool de lotes</span>
-									<span className="hidden sm:inline">Pool de lotes publicos</span>
-								</h1>
+								<div>
+									<h1 className="text-3xl font-semibold text-slate-900">
+										<span className="sm:hidden">Pool de lotes</span>
+										<span className="hidden sm:inline">Pool de lotes publicos</span>
+									</h1>
+									<p className="mt-1 text-sm font-semibold text-slate-700">{currentUserName}</p>
+								</div>
 								<Image src="/pool-logo.svg" alt="Pool" width={72} height={20} className="shrink-0 sm:hidden" />
 							</div>
 
@@ -337,10 +379,15 @@ export default function PoolPage() {
 											<img
 												src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
 												alt={lot.part_name || lot.part_num}
-												className="h-20 w-20 rounded border border-slate-200 bg-white object-contain sm:h-16 sm:w-16"
+												loading="lazy"
+												decoding="async"
+												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
 											/>
 										) : (
-											<div className="h-20 w-20 rounded border border-slate-200 bg-white sm:h-16 sm:w-16" />
+											<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
+												<span className="leading-none">IMG</span>
+												<span className="leading-none">Sin imagen</span>
+											</div>
 										)}
 
 										<div className="min-w-0 flex-1">
@@ -380,29 +427,51 @@ export default function PoolPage() {
 
 									<div className="mt-1 flex w-full items-center justify-end gap-2 sm:ml-3 sm:mt-0 sm:w-auto">
 										<div className="flex items-center gap-2">
+											{(() => {
+												const isOwner = lot.owner_id === currentUserId;
+												const isComplete = lot.remaining_quantity <= 0;
+												const hasMyPending = lot.my_pending_quantity > 0;
+												const disableControls = sendingOfferLotId === lot.id || isOwner || (isComplete && !hasMyPending);
+												const maxOffer = Math.max(1, lot.remaining_quantity + lot.my_pending_quantity);
+												const buttonLabel = isOwner ? "Tu lote" : hasMyPending ? "Actualizar" : isComplete ? "Completo" : "Yo tengo";
+
+												return (
+													<>
 											<input
 												type="number"
 												min={1}
+												max={maxOffer}
 												value={offerQtyByLot[lot.id] ?? 1}
 												onChange={(event) =>
 													setOfferQtyByLot((current) => ({
 														...current,
-														[lot.id]: Math.max(1, Number(event.target.value) || 1),
+														[lot.id]: Math.min(maxOffer, Math.max(1, Number(event.target.value) || 1)),
 													}))
 												}
-												disabled={(Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.owner_id === currentUserId || lot.claimed_status === "accepted"}
+												disabled={disableControls}
 												className="quantity-input w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm text-slate-900"
 											/>
 											<button
 												type="button"
 												onClick={() => void sendOffer(lot)}
-												disabled={sendingOfferLotId === lot.id || lot.owner_id === currentUserId || (Boolean(lot.claimed_by_id) && lot.claimed_by_id !== currentUserId) || lot.claimed_status === "accepted"}
+												disabled={disableControls}
 												className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
 											>
-												{lot.owner_id === currentUserId
-													? "Tu lote"
-													: lot.claimed_by_name?.trim() || (lot.claimed_by_id ? "Reservado" : "Yo tengo")}
+												{buttonLabel}
 											</button>
+											{hasMyPending ? (
+												<button
+													type="button"
+													onClick={() => void sendOffer(lot, { remove: true })}
+													disabled={sendingOfferLotId === lot.id || isOwner}
+													className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+												>
+													Quitar
+												</button>
+											) : null}
+													</>
+												);
+											})()}
 										</div>
 									</div>
 								</div>

@@ -100,6 +100,7 @@ export default function ListDetailPage() {
 	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
+	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
 	const totals = useMemo(() => {
 		return lots.reduce(
@@ -377,34 +378,67 @@ export default function ListDetailPage() {
 		}
 
 		const missingItems = [...uniqueByKey.entries()]
-			.filter(([key]) => !(key in partImages))
+			.filter(([key]) => !(key in partImages) && !imageRequestInFlightRef.current.has(key))
 			.map(([, item]) => item);
 
 		if (missingItems.length === 0) return;
 
-		try {
-			const response = await fetch("/api/rebrickable/part-images", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ items: missingItems }),
-			});
-			if (!response.ok) return;
-
-			const payload = (await response.json()) as {
-				results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
-			};
-
-			const additions: PartImageLookup = {};
-			for (const part of payload.results ?? []) {
-				if (!part.key) continue;
-				additions[part.key] = part.part_img_url;
+		const chunkSize = 100;
+		for (let index = 0; index < missingItems.length; index += chunkSize) {
+			const chunk = missingItems.slice(index, index + chunkSize);
+			const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
+			for (const key of requestedKeys) {
+				imageRequestInFlightRef.current.add(key);
 			}
 
-			if (Object.keys(additions).length > 0) {
+			try {
+				const response = await fetch("/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ items: chunk }),
+				});
+
+				if (!response.ok) {
+					setPartImages((current) => {
+						const next = { ...current };
+						for (const key of requestedKeys) {
+							next[key] = null;
+						}
+						return next;
+					});
+					continue;
+				}
+
+				const payload = (await response.json()) as {
+					results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
+				};
+
+				const additions: PartImageLookup = {};
+				for (const part of payload.results ?? []) {
+					if (!part.key) continue;
+					additions[part.key] = part.part_img_url;
+				}
+
+				for (const key of requestedKeys) {
+					if (!(key in additions)) {
+						additions[key] = null;
+					}
+				}
+
 				setPartImages((current) => ({ ...current, ...additions }));
+			} catch {
+				setPartImages((current) => {
+					const next = { ...current };
+					for (const key of requestedKeys) {
+						next[key] = null;
+					}
+					return next;
+				});
+			} finally {
+				for (const key of requestedKeys) {
+					imageRequestInFlightRef.current.delete(key);
+				}
 			}
-		} catch {
-			// No bloquea si falla carga de imagenes.
 		}
 	}
 
@@ -1019,11 +1053,16 @@ export default function ListDetailPage() {
 										<img
 											src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
 											alt={lot.part_name || lot.part_num}
+											loading="lazy"
+											decoding="async"
 											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
 										/>
-										) : (
-											<div className="h-16 w-16 rounded border border-slate-200 bg-white" />
-										)}
+									) : (
+										<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
+											<span className="leading-none">IMG</span>
+											<span className="leading-none">Sin imagen</span>
+										</div>
+									)}
 
 										<div className="min-w-0 flex-1">
 											<div className="flex items-start justify-between gap-2">
@@ -1033,11 +1072,19 @@ export default function ListDetailPage() {
 												<div
 													className={`w-fit max-w-full rounded-md px-3 py-1 text-xs ${offersByLot[String(lot.id)] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}
 												>
-													{offersByLot[String(lot.id)]
-														? offersByLot[String(lot.id)].byUser
-															.map((u) => `${u.name} (${u.pieces})`)
-															.join(", ")
-														: "Sin ofertas"}
+													{(() => {
+														const summary = offersByLot[String(lot.id)];
+														if (!summary) return "Sin ofertas";
+
+														const offeredPieces = Number(summary.pieces ?? 0);
+														const neededPieces = Number(lot.quantity ?? 0);
+														const isComplete = offeredPieces >= neededPieces;
+														const usersCount = summary.byUser.length;
+
+														if (!isComplete) return `${offeredPieces}/${neededPieces} ofrecidas`;
+														if (usersCount === 1) return summary.byUser[0]?.name || "1 oferta";
+														return `${usersCount} ofertas`;
+													})()}
 												</div>
 											</div>
 

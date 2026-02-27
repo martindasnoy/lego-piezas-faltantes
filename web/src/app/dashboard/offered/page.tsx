@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
@@ -28,6 +28,7 @@ export default function OfferedPage() {
 	const [rows, setRows] = useState<OfferedRow[]>([]);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [message, setMessage] = useState<string | null>(null);
+	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -133,34 +134,56 @@ export default function OfferedPage() {
 			}
 
 			const missingItems = [...uniqueByKey.entries()]
-				.filter(([key]) => !(key in partImages))
+				.filter(([key]) => !(key in partImages) && !imageRequestInFlightRef.current.has(key))
 				.map(([, item]) => item);
 
 			if (missingItems.length === 0) return;
 
-			try {
-				const response = await fetch("/api/rebrickable/part-images", {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ items: missingItems }),
-				});
-				if (!response.ok) return;
+			const chunkSize = 100;
+			for (let index = 0; index < missingItems.length; index += chunkSize) {
+				const chunk = missingItems.slice(index, index + chunkSize);
+				const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
+				for (const key of requestedKeys) imageRequestInFlightRef.current.add(key);
 
-				const payload = (await response.json()) as {
-					results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
-				};
+				try {
+					const response = await fetch("/api/rebrickable/part-images", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ items: chunk }),
+					});
+					if (!response.ok) {
+						setPartImages((current) => {
+							const next = { ...current };
+							for (const key of requestedKeys) next[key] = null;
+							return next;
+						});
+						continue;
+					}
 
-				const additions: PartImageLookup = {};
-				for (const part of payload.results ?? []) {
-					if (!part.key) continue;
-					additions[part.key] = part.part_img_url;
-				}
+					const payload = (await response.json()) as {
+						results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
+					};
 
-				if (Object.keys(additions).length > 0) {
+					const additions: PartImageLookup = {};
+					for (const part of payload.results ?? []) {
+						if (!part.key) continue;
+						additions[part.key] = part.part_img_url;
+					}
+
+					for (const key of requestedKeys) {
+						if (!(key in additions)) additions[key] = null;
+					}
+
 					setPartImages((current) => ({ ...current, ...additions }));
+				} catch {
+					setPartImages((current) => {
+						const next = { ...current };
+						for (const key of requestedKeys) next[key] = null;
+						return next;
+					});
+				} finally {
+					for (const key of requestedKeys) imageRequestInFlightRef.current.delete(key);
 				}
-			} catch {
-				// No bloquea render
 			}
 		}
 
@@ -212,10 +235,15 @@ export default function OfferedPage() {
 															<img
 																src={partImages[getPartImageKey(row.part_num, row.color_name)] ?? undefined}
 																alt={row.part_name}
+																loading="lazy"
+																decoding="async"
 																className="h-12 w-12 rounded border border-slate-200 bg-white object-contain"
 															/>
 														) : (
-															<div className="h-12 w-12 rounded border border-slate-200 bg-white" />
+															<div className="flex h-12 w-12 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[8px] text-slate-500">
+																<span className="leading-none">IMG</span>
+																<span className="leading-none">Sin imagen</span>
+															</div>
 														)}
 														<div className="min-w-0">
 															<p className="font-semibold text-slate-900">{row.part_name}</p>
