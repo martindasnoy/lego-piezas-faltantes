@@ -555,7 +555,7 @@ export default function DashboardPage() {
 								href="/pool"
 								className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
 							>
-								Entrar al pool
+								Pool de items deseados
 							</Link>
 						</div>
 					</div>
