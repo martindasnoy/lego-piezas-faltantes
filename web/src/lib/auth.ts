@@ -7,6 +7,7 @@ type AuthInput = {
 
 type SignUpInput = AuthInput & {
 	displayName?: string;
+	redirectTo?: string;
 };
 
 type AuthResult = {
@@ -37,12 +38,13 @@ export async function signInUser({ email, password }: AuthInput): Promise<AuthRe
 	}
 }
 
-export async function signUpUser({ email, password, displayName }: SignUpInput): Promise<AuthResult> {
+export async function signUpUser({ email, password, displayName, redirectTo }: SignUpInput): Promise<AuthResult> {
 	try {
 		const { error } = await getSupabaseClient().auth.signUp({
 			email,
 			password,
 			options: {
+				emailRedirectTo: redirectTo,
 				data: {
 					display_name: displayName ?? "",
 				},

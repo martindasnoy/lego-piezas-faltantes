@@ -45,6 +45,7 @@ export function AuthCard() {
 					email: cleanEmail,
 					password: cleanPassword,
 					displayName: displayName.trim(),
+					redirectTo: typeof window !== "undefined" ? `${window.location.origin}/dashboard` : undefined,
 			  });
 
 		setMessage(result.message);
