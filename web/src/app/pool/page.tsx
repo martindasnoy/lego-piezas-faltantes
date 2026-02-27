@@ -338,8 +338,8 @@ export default function PoolPage() {
 							<div className="mt-0 flex items-start justify-between gap-2">
 								<div>
 									<h1 className="text-3xl font-semibold text-slate-900">
-										<span className="sm:hidden">Pool de lotes</span>
-										<span className="hidden sm:inline">Pool de lotes publicos</span>
+										<span className="sm:hidden">Pool de items deseados</span>
+										<span className="hidden sm:inline">Pool de items deseados</span>
 									</h1>
 									<p className="mt-1 text-sm font-semibold text-slate-700">{currentUserName}</p>
 								</div>

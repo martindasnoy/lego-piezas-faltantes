@@ -47,14 +47,14 @@ export default function OfferedPage() {
 
 				const { data, error } = await supabase.rpc("get_my_offered_pieces");
 				if (error) {
-					setMessage(`No se pudo cargar Piezas ofertadas: ${error.message}. Ejecuta web/supabase/offers_mine_rpc.sql`);
+					setMessage(`No se pudo cargar Items Ofertados: ${error.message}. Ejecuta web/supabase/offers_mine_rpc.sql`);
 					setRows([]);
 					return;
 				}
 
 				setRows(((data as OfferedRow[]) ?? []).map((row) => ({ ...row, total_quantity: Number(row.total_quantity ?? 0) })));
 			} catch (error) {
-				setMessage(error instanceof Error ? error.message : "No se pudo cargar Piezas ofertadas.");
+				setMessage(error instanceof Error ? error.message : "No se pudo cargar Items Ofertados.");
 			} finally {
 				setLoading(false);
 			}
@@ -206,7 +206,7 @@ export default function OfferedPage() {
 						<Link href="/dashboard" className="order-1 self-end text-sm text-slate-600 hover:underline sm:order-2 sm:self-auto">
 							← Volver
 						</Link>
-						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Piezas ofertadas</h1>
+						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Items Ofertados</h1>
 					</div>
 					<p className="mt-1 text-sm text-slate-600">Lotes: {totals.lots} - Piezas: {totals.pieces}</p>
 				</header>

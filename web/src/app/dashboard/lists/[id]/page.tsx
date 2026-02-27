@@ -878,7 +878,7 @@ export default function ListDetailPage() {
 						<Link href="/dashboard" className="order-1 self-end text-sm text-slate-600 hover:underline sm:order-2 sm:self-auto">
 							← Volver
 						</Link>
-						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Lista {list.name.toLocaleUpperCase("es-AR")}</h1>
+						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Lista de deseo {list.name.toLocaleUpperCase("es-AR")}</h1>
 					</div>
 					<p className="mt-1 text-sm text-slate-600">
 						<span className="sm:hidden">
@@ -1033,7 +1033,7 @@ export default function ListDetailPage() {
 									disabled={saving}
 									className="h-11 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
 								>
-									{saving ? "Guardando..." : "Agregar lote"}
+									{saving ? "Guardando..." : "Agregar item"}
 								</button>
 							</div>
 						</div>
@@ -1041,7 +1041,6 @@ export default function ListDetailPage() {
 				</section>
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
-					<h2 className="text-2xl font-semibold text-slate-900">Lotes de la lista</h2>
 					{lots.length === 0 ? (
 						<p className="mt-3 text-sm text-slate-600">Todavia no agregaste lotes.</p>
 					) : (

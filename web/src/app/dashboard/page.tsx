@@ -402,7 +402,7 @@ export default function DashboardPage() {
 				</header>
 
 				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-3 sm:p-4">
-					<h2 className="text-xl font-semibold text-slate-900">Crear nueva lista</h2>
+					<h2 className="text-xl font-semibold text-slate-900">Crear nueva lista de deseos</h2>
 					<form onSubmit={createList} className="mt-3 space-y-3">
 						<div>
 							<input
@@ -536,7 +536,7 @@ export default function DashboardPage() {
 								<div className="flex items-start justify-between gap-3">
 									<div>
 										<Link href="/dashboard/offered" className="text-base font-semibold hover:underline">
-											Piezas ofertadas
+											Items Ofertados
 										</Link>
 										<p className="mt-1 text-xs text-white/90">Lista automatica. Resume tus "Yo tengo".</p>
 									</div>
