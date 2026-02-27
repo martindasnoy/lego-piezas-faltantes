@@ -488,7 +488,7 @@ export default function DashboardPage() {
 															className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
 															title="Editar nombre"
 														>
-															Editar
+															✎
 														</button>
 													</div>
 												)}
