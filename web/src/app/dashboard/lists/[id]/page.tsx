@@ -29,6 +29,7 @@ type PartSuggestion = {
 };
 
 type PartImageLookup = Record<string, string | null>;
+type PartImageRequestItem = { part_num: string; color_name?: string | null };
 type OfferSummaryByLot = Record<
 	string,
 	{ offers: number; pieces: number; byUser: Array<{ name: string; pieces: number }> }
@@ -76,6 +77,9 @@ export default function ListDetailPage() {
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [updatingLotId, setUpdatingLotId] = useState<string | null>(null);
+	const [updatingLotColorId, setUpdatingLotColorId] = useState<string | null>(null);
+	const [colorPickerLotId, setColorPickerLotId] = useState<string | null>(null);
+	const [colorPickerSearch, setColorPickerSearch] = useState("");
 	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
 	const [message, setMessage] = useState<string | null>(null);
@@ -132,6 +136,23 @@ export default function ListDetailPage() {
 			})
 			;
 	}, [availableColors, colorInput, useBricklinkNomenclature]);
+
+	const activeColorPickerLot = useMemo(() => {
+		if (!colorPickerLotId) return null;
+		return lots.find((lot) => lot.id === colorPickerLotId) ?? null;
+	}, [colorPickerLotId, lots]);
+
+	const filteredLotColorOptions = useMemo(() => {
+		const query = colorPickerSearch.trim().toLowerCase();
+		if (!query) return availableColors;
+
+		return availableColors.filter((color) => {
+			const storedName = getStoredColorName(color).toLowerCase();
+			const legoName = color.name.toLowerCase();
+			const blName = (color.blName ?? "").trim().toLowerCase();
+			return storedName.includes(query) || legoName.includes(query) || blName.includes(query);
+		});
+	}, [availableColors, colorPickerSearch]);
 
 	const filteredCatalogCategories = useMemo(() => {
 		const byName = (a: CatalogCategory, b: CatalogCategory) =>
@@ -245,7 +266,12 @@ export default function ListDetailPage() {
 				} else {
 					const loadedLots = (lotRows as Lot[]) ?? [];
 					setLots(loadedLots);
-					void loadPartImages(loadedLots.map((lot) => lot.part_num));
+					void loadPartImages(
+						loadedLots.map((lot) => ({
+							part_num: lot.part_num,
+							color_name: lot.color_name,
+						})),
+					);
 					void loadOffersForLots(loadedLots.map((lot) => String(lot.id)));
 				}
 			} catch (error) {
@@ -323,24 +349,55 @@ export default function ListDetailPage() {
 		return () => document.removeEventListener("mousedown", handleOutsideClick);
 	}, [showColorSuggestions]);
 
-	async function loadPartImages(partNums: string[]) {
-		const uniqueNums = [...new Set(partNums.map((num) => num.trim()).filter(Boolean))];
-		if (uniqueNums.length === 0) return;
+	function getPartImageKey(partNum: string, colorName: string | null | undefined) {
+		const normalizedColor = (colorName ?? "")
+			.replace(/\(chino\)/gi, "")
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.trim();
+		return `${partNum.trim()}::${normalizedColor}`;
+	}
 
-		const missingNums = uniqueNums.filter((num) => !(num in partImages));
-		if (missingNums.length === 0) return;
+	async function loadPartImages(items: PartImageRequestItem[]) {
+		const normalizedItems = items
+			.map((item) => ({
+				part_num: item.part_num.trim(),
+				color_name: item.color_name ?? null,
+			}))
+			.filter((item) => item.part_num.length > 0);
+
+		if (normalizedItems.length === 0) return;
+
+		const uniqueByKey = new Map<string, PartImageRequestItem>();
+		for (const item of normalizedItems) {
+			const key = getPartImageKey(item.part_num, item.color_name);
+			if (!uniqueByKey.has(key)) {
+				uniqueByKey.set(key, item);
+			}
+		}
+
+		const missingItems = [...uniqueByKey.entries()]
+			.filter(([key]) => !(key in partImages))
+			.map(([, item]) => item);
+
+		if (missingItems.length === 0) return;
 
 		try {
-			const response = await fetch(`/api/rebrickable/parts-by-num?nums=${encodeURIComponent(missingNums.join(","))}`);
+			const response = await fetch("/api/rebrickable/part-images", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ items: missingItems }),
+			});
 			if (!response.ok) return;
 
 			const payload = (await response.json()) as {
-				results?: Array<{ part_num: string; part_img_url: string | null }>;
+				results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
 			};
 
 			const additions: PartImageLookup = {};
 			for (const part of payload.results ?? []) {
-				additions[part.part_num] = part.part_img_url;
+				if (!part.key) continue;
+				additions[part.key] = part.part_img_url;
 			}
 
 			if (Object.keys(additions).length > 0) {
@@ -476,9 +533,12 @@ export default function ListDetailPage() {
 
 			setLots((current) => [data as Lot, ...current]);
 			if (selectedPart?.part_img_url) {
-				setPartImages((current) => ({ ...current, [partNum]: selectedPart.part_img_url }));
+				setPartImages((current) => ({
+					...current,
+					[getPartImageKey(partNum, color || null)]: selectedPart.part_img_url,
+				}));
 			} else {
-				void loadPartImages([partNum]);
+				void loadPartImages([{ part_num: partNum, color_name: color || null }]);
 			}
 			void loadOffersForLots([...(lots.map((lot) => String(lot.id))), String((data as Lot).id)]);
 			setPartInput("");
@@ -616,7 +676,7 @@ export default function ListDetailPage() {
 		if (selectedCatalogPart.part_img_url) {
 			setPartImages((current) => ({
 				...current,
-				[selectedCatalogPart.part_num]: selectedCatalogPart.part_img_url,
+				[getPartImageKey(selectedCatalogPart.part_num, null)]: selectedCatalogPart.part_img_url,
 			}));
 		}
 
@@ -636,10 +696,46 @@ export default function ListDetailPage() {
 		return match?.hex ?? "#d1d5db";
 	}
 
+	function getTextColorForBackground(hex: string) {
+		const normalized = hex.replace("#", "").trim();
+		if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return "#111827";
+		const r = Number.parseInt(normalized.slice(0, 2), 16);
+		const g = Number.parseInt(normalized.slice(2, 4), 16);
+		const b = Number.parseInt(normalized.slice(4, 6), 16);
+		const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+		return brightness > 150 ? "#111827" : "#ffffff";
+	}
+
+	function getStoredColorName(color: GobrickColor) {
+		const baseName = color.blName?.trim() || color.name;
+		return `${baseName}${color.uniqueFlag ? " (Chino)" : ""}`;
+	}
+
+	function openLotColorPicker(lotId: string) {
+		setColorPickerLotId(lotId);
+		setColorPickerSearch("");
+	}
+
+	function closeLotColorPicker() {
+		setColorPickerLotId(null);
+		setColorPickerSearch("");
+	}
+
+	function chooseLotColor(nextColorName: string | null) {
+		if (!colorPickerLotId) return;
+		const lotId = colorPickerLotId;
+		closeLotColorPicker();
+		void persistLotColor(lotId, nextColorName);
+	}
+
 	function setLocalLotQuantity(lotId: string, nextQuantity: number) {
 		setLots((current) =>
 			current.map((lot) => (lot.id === lotId ? { ...lot, quantity: Number.isFinite(nextQuantity) ? nextQuantity : lot.quantity } : lot)),
 		);
+	}
+
+	function setLocalLotColor(lotId: string, nextColorName: string | null) {
+		setLots((current) => current.map((lot) => (lot.id === lotId ? { ...lot, color_name: nextColorName } : lot)));
 	}
 
 	async function persistLotQuantity(lotId: string, nextQuantity: number) {
@@ -659,6 +755,36 @@ export default function ListDetailPage() {
 			setLocalLotQuantity(lotId, quantity);
 		} finally {
 			setUpdatingLotId(null);
+		}
+	}
+
+	async function persistLotColor(lotId: string, nextColorName: string | null) {
+		const colorName = nextColorName?.trim() ? nextColorName.trim() : null;
+		setUpdatingLotColorId(lotId);
+		setMessage(null);
+
+		try {
+			const targetLot = lots.find((lot) => lot.id === lotId) ?? null;
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("list_items").update({ color_name: colorName }).eq("id", lotId);
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			setLocalLotColor(lotId, colorName);
+
+			if (targetLot) {
+				void loadPartImages([
+					{
+						part_num: targetLot.part_num,
+						color_name: colorName,
+					},
+				]);
+			}
+		} finally {
+			setUpdatingLotColorId(null);
 		}
 	}
 
@@ -711,7 +837,7 @@ export default function ListDetailPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+		<div className="min-h-screen bg-[#5bb9e8] px-4 py-6 sm:bg-[#006eb2] sm:px-6 sm:py-8">
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -889,12 +1015,12 @@ export default function ListDetailPage() {
 							{lots.map((lot) => (
 								<li key={lot.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
 									<div className="flex items-start gap-3 text-sm text-slate-800">
-										{partImages[lot.part_num] ? (
-											<img
-												src={partImages[lot.part_num] ?? undefined}
-												alt={lot.part_name || lot.part_num}
-												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-											/>
+									{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
+										<img
+											src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
+											alt={lot.part_name || lot.part_num}
+											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
+										/>
 										) : (
 											<div className="h-16 w-16 rounded border border-slate-200 bg-white" />
 										)}
@@ -917,11 +1043,19 @@ export default function ListDetailPage() {
 
 									<div className="mt-2 flex items-center justify-between gap-2">
 										<div className="flex items-center gap-2">
-											<span
-												className="h-4 w-4 rounded border border-slate-300"
-												style={{ backgroundColor: getColorHexFromName(lot.color_name) }}
-												title={lot.color_name || "Sin color"}
-											/>
+											<button
+												type="button"
+												onClick={() => openLotColorPicker(lot.id)}
+												disabled={updatingLotColorId === lot.id}
+												className="inline-flex w-20 items-center rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+												style={{
+													backgroundColor: getColorHexFromName(lot.color_name),
+													color: getTextColorForBackground(getColorHexFromName(lot.color_name)),
+												}}
+												title="Cambiar color"
+											>
+												<span className="block w-full truncate text-left">{lot.color_name || "Sin color"}</span>
+											</button>
 											<span className="font-semibold text-slate-900">#{lot.part_num}</span>
 											<input
 												type="number"
@@ -963,6 +1097,65 @@ export default function ListDetailPage() {
 						</ul>
 					)}
 				</section>
+
+				{activeColorPickerLot ? (
+					<div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 p-4" onClick={closeLotColorPicker}>
+						<div
+							className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl"
+							onClick={(event) => event.stopPropagation()}
+						>
+							<div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
+								<h3 className="text-lg font-semibold text-slate-900">Elegir color</h3>
+								<button
+									type="button"
+									onClick={closeLotColorPicker}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<p className="mt-2 text-xs text-slate-600">Doble click para seleccionar color.</p>
+
+							<input
+								type="text"
+								value={colorPickerSearch}
+								onChange={(event) => setColorPickerSearch(event.target.value)}
+								placeholder="Buscar color..."
+								className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500"
+							/>
+
+							<ul className="mt-3 max-h-72 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
+								<li>
+									<button
+										type="button"
+										onDoubleClick={() => chooseLotColor(null)}
+										className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-slate-50"
+									>
+										<span className="h-4 w-4 rounded border border-slate-300 bg-white" />
+										<span className="text-sm text-slate-900">Sin color</span>
+									</button>
+								</li>
+								{filteredLotColorOptions.map((color) => {
+									const storedName = getStoredColorName(color);
+									const isCurrent = (activeColorPickerLot.color_name || "") === storedName;
+									return (
+										<li key={color.id}>
+											<button
+												type="button"
+												onDoubleClick={() => chooseLotColor(storedName)}
+												className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-slate-50 ${isCurrent ? "bg-slate-100" : ""}`}
+											>
+												<span className="h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: color.hex }} />
+												<span className="text-sm text-slate-900">{storedName}</span>
+											</button>
+										</li>
+									);
+								})}
+							</ul>
+						</div>
+					</div>
+				) : null}
 
 				{showCatalogModal ? (
 					<div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-900/45 p-0 sm:items-center sm:p-4">

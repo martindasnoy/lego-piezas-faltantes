@@ -18,11 +18,15 @@ type OfferedRow = {
 	last_status: "pending" | "accepted" | "rejected" | string;
 };
 
+type PartImageLookup = Record<string, string | null>;
+type PartImageRequestItem = { part_num: string; color_name?: string | null };
+
 export default function OfferedPage() {
 	const router = useRouter();
 	const [loading, setLoading] = useState(true);
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const [rows, setRows] = useState<OfferedRow[]>([]);
+	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [message, setMessage] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -100,6 +104,69 @@ export default function OfferedPage() {
 		return status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : "Sin estado";
 	}
 
+	function getPartImageKey(partNum: string, colorName: string | null | undefined) {
+		const normalizedColor = (colorName ?? "")
+			.replace(/\(chino\)/gi, "")
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.trim();
+		return `${partNum.trim()}::${normalizedColor}`;
+	}
+
+	useEffect(() => {
+		async function loadPartImages(items: PartImageRequestItem[]) {
+			const normalizedItems = items
+				.map((item) => ({
+					part_num: item.part_num.trim(),
+					color_name: item.color_name ?? null,
+				}))
+				.filter((item) => item.part_num.length > 0);
+
+			if (normalizedItems.length === 0) return;
+
+			const uniqueByKey = new Map<string, PartImageRequestItem>();
+			for (const item of normalizedItems) {
+				const key = getPartImageKey(item.part_num, item.color_name);
+				if (!uniqueByKey.has(key)) {
+					uniqueByKey.set(key, item);
+				}
+			}
+
+			const missingItems = [...uniqueByKey.entries()]
+				.filter(([key]) => !(key in partImages))
+				.map(([, item]) => item);
+
+			if (missingItems.length === 0) return;
+
+			try {
+				const response = await fetch("/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ items: missingItems }),
+				});
+				if (!response.ok) return;
+
+				const payload = (await response.json()) as {
+					results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
+				};
+
+				const additions: PartImageLookup = {};
+				for (const part of payload.results ?? []) {
+					if (!part.key) continue;
+					additions[part.key] = part.part_img_url;
+				}
+
+				if (Object.keys(additions).length > 0) {
+					setPartImages((current) => ({ ...current, ...additions }));
+				}
+			} catch {
+				// No bloquea render
+			}
+		}
+
+		void loadPartImages(rows.map((row) => ({ part_num: row.part_num, color_name: row.color_name })));
+	}, [rows, partImages]);
+
 	if (loading) {
 		return (
 			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
@@ -140,18 +207,29 @@ export default function OfferedPage() {
 										{group.rows.map((row) => (
 											<li key={row.list_item_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
 												<div className="flex flex-wrap items-start justify-between gap-2 text-sm sm:items-center">
-													<div>
-														<p className="font-semibold text-slate-900">{row.part_name}</p>
-														<p className="text-slate-600">
-															<span className="ml-1 inline-flex items-center gap-1">
+													<div className="flex min-w-0 items-start gap-3">
+														{partImages[getPartImageKey(row.part_num, row.color_name)] ? (
+															<img
+																src={partImages[getPartImageKey(row.part_num, row.color_name)] ?? undefined}
+																alt={row.part_name}
+																className="h-12 w-12 rounded border border-slate-200 bg-white object-contain"
+															/>
+														) : (
+															<div className="h-12 w-12 rounded border border-slate-200 bg-white" />
+														)}
+														<div className="min-w-0">
+															<p className="font-semibold text-slate-900">{row.part_name}</p>
+															<p className="text-slate-600">
+																<span className="ml-1 inline-flex items-center gap-1">
 																<span
 																	className="inline-block h-3 w-3 rounded border border-slate-300"
 																	style={{ backgroundColor: getColorHexFromName(row.color_name) }}
 																	title={row.color_name || "Sin color"}
 																/>
-																{row.color_name || "Sin color"}
-															</span>
-														</p>
+																	{row.color_name || "Sin color"}
+																</span>
+															</p>
+														</div>
 													</div>
 													<div className="w-full sm:w-auto sm:text-right">
 														<p className="hidden font-semibold text-slate-900 sm:block">x{row.total_quantity}</p>

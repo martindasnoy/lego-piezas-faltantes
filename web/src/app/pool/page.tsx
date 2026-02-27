@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
+import { gobrickColors } from "@/lib/gobrick-colors";
 
 type PoolLot = {
 	id: string;
@@ -27,6 +28,7 @@ type RpcPoolLot = PoolLot & {
 };
 
 type PartImageLookup = Record<string, string | null>;
+type PartImageRequestItem = { part_num: string; color_name?: string | null };
 type ToggleOfferRpcRow = {
 	action: "created" | "deleted";
 	claimed_by_id: string | null;
@@ -174,24 +176,55 @@ export default function PoolPage() {
 		}
 	}
 
-	async function loadPartImages(partNums: string[]) {
-		const uniqueNums = [...new Set(partNums.map((num) => num.trim()).filter(Boolean))];
-		if (uniqueNums.length === 0) return;
+	function getPartImageKey(partNum: string, colorName: string | null | undefined) {
+		const normalizedColor = (colorName ?? "")
+			.replace(/\(chino\)/gi, "")
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.trim();
+		return `${partNum.trim()}::${normalizedColor}`;
+	}
 
-		const missingNums = uniqueNums.filter((num) => !(num in partImages));
-		if (missingNums.length === 0) return;
+	async function loadPartImages(items: PartImageRequestItem[]) {
+		const normalizedItems = items
+			.map((item) => ({
+				part_num: item.part_num.trim(),
+				color_name: item.color_name ?? null,
+			}))
+			.filter((item) => item.part_num.length > 0);
+
+		if (normalizedItems.length === 0) return;
+
+		const uniqueByKey = new Map<string, PartImageRequestItem>();
+		for (const item of normalizedItems) {
+			const key = getPartImageKey(item.part_num, item.color_name);
+			if (!uniqueByKey.has(key)) {
+				uniqueByKey.set(key, item);
+			}
+		}
+
+		const missingItems = [...uniqueByKey.entries()]
+			.filter(([key]) => !(key in partImages))
+			.map(([, item]) => item);
+
+		if (missingItems.length === 0) return;
 
 		try {
-			const response = await fetch(`/api/rebrickable/parts-by-num?nums=${encodeURIComponent(missingNums.join(","))}`);
+			const response = await fetch("/api/rebrickable/part-images", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ items: missingItems }),
+			});
 			if (!response.ok) return;
 
 			const payload = (await response.json()) as {
-				results?: Array<{ part_num: string; part_img_url: string | null }>;
+				results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
 			};
 
 			const additions: PartImageLookup = {};
 			for (const part of payload.results ?? []) {
-				additions[part.part_num] = part.part_img_url;
+				if (!part.key) continue;
+				additions[part.key] = part.part_img_url;
 			}
 
 			if (Object.keys(additions).length > 0) {
@@ -202,8 +235,30 @@ export default function PoolPage() {
 		}
 	}
 
+	function getColorHexFromName(colorName: string | null) {
+		if (!colorName) return "#d1d5db";
+		const normalized = colorName.replace("(Chino)", "").trim().toLowerCase();
+		const match = gobrickColors.find((color) => color.name.toLowerCase() === normalized || (color.blName ?? "").trim().toLowerCase() === normalized);
+		return match?.hex ?? "#d1d5db";
+	}
+
+	function getTextColorForBackground(hex: string) {
+		const normalized = hex.replace("#", "").trim();
+		if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return "#111827";
+		const r = Number.parseInt(normalized.slice(0, 2), 16);
+		const g = Number.parseInt(normalized.slice(2, 4), 16);
+		const b = Number.parseInt(normalized.slice(4, 6), 16);
+		const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+		return brightness > 150 ? "#111827" : "#ffffff";
+	}
+
 	useEffect(() => {
-		void loadPartImages(publicLots.map((lot) => lot.part_num));
+		void loadPartImages(
+			publicLots.map((lot) => ({
+				part_num: lot.part_num,
+				color_name: lot.color_name,
+			})),
+		);
 	}, [publicLots]);
 
 	const lotCards = useMemo<PoolLot[]>(() => {
@@ -278,9 +333,9 @@ export default function PoolPage() {
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
-										{partImages[lot.part_num] ? (
+										{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
 											<img
-												src={partImages[lot.part_num] ?? undefined}
+												src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
 												alt={lot.part_name || lot.part_num}
 												className="h-20 w-20 rounded border border-slate-200 bg-white object-contain sm:h-16 sm:w-16"
 											/>
@@ -295,12 +350,28 @@ export default function PoolPage() {
 												</span>
 											</p>
 											<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-700 sm:hidden">
-												<p>{lot.color_name || "Sin color"}</p>
+												<span
+													className="inline-flex w-20 items-center rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold"
+													style={{
+														backgroundColor: getColorHexFromName(lot.color_name),
+														color: getTextColorForBackground(getColorHexFromName(lot.color_name)),
+													}}
+												>
+													<span className="block w-full truncate text-left">{lot.color_name || "Sin color"}</span>
+												</span>
 												<p>x{lot.quantity}</p>
 												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
 											</div>
 											<div className="mt-1 hidden flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:flex">
-												<p>{lot.color_name || "Sin color"}</p>
+												<span
+													className="inline-flex w-20 items-center rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold"
+													style={{
+														backgroundColor: getColorHexFromName(lot.color_name),
+														color: getTextColorForBackground(getColorHexFromName(lot.color_name)),
+													}}
+												>
+													<span className="block w-full truncate text-left">{lot.color_name || "Sin color"}</span>
+												</span>
 												<p>x{lot.quantity}</p>
 												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
 											</div>

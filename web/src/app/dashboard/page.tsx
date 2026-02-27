@@ -26,6 +26,9 @@ export default function DashboardPage() {
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [switchingId, setSwitchingId] = useState<string | null>(null);
+	const [editingListId, setEditingListId] = useState<string | null>(null);
+	const [editingListNameInput, setEditingListNameInput] = useState("");
+	const [renamingListId, setRenamingListId] = useState<string | null>(null);
 	const [deletingListId, setDeletingListId] = useState<string | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<UserList | null>(null);
 	const [showUserSettings, setShowUserSettings] = useState(false);
@@ -188,6 +191,43 @@ export default function DashboardPage() {
 			);
 		} finally {
 			setSwitchingId(null);
+		}
+	}
+
+	function openRenameList(list: UserList) {
+		setEditingListId(list.id);
+		setEditingListNameInput(list.name);
+	}
+
+	function cancelRenameList() {
+		setEditingListId(null);
+		setEditingListNameInput("");
+	}
+
+	async function saveRenameList(listId: string) {
+		const nextName = editingListNameInput.trim();
+		if (!nextName) {
+			setMessage("El nombre de la lista no puede estar vacio.");
+			return;
+		}
+
+		setRenamingListId(listId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("lists").update({ name: nextName }).eq("id", listId);
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			setLists((current) => current.map((list) => (list.id === listId ? { ...list, name: nextName } : list)));
+			setEditingListId(null);
+			setEditingListNameInput("");
+		} finally {
+			setRenamingListId(null);
 		}
 	}
 
@@ -410,9 +450,48 @@ export default function DashboardPage() {
 									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
 										<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 											<div>
-												<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
-													{list.name}
-												</Link>
+												{editingListId === list.id ? (
+													<div className="flex flex-wrap items-center gap-2">
+														<input
+															type="text"
+															value={editingListNameInput}
+															onChange={(event) => setEditingListNameInput(event.target.value)}
+															disabled={renamingListId === list.id}
+															className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
+														/>
+														<button
+															type="button"
+															onClick={() => void saveRenameList(list.id)}
+															disabled={renamingListId === list.id}
+															className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+														>
+															Guardar
+														</button>
+														<button
+															type="button"
+															onClick={cancelRenameList}
+															disabled={renamingListId === list.id}
+															className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+														>
+															Cancelar
+														</button>
+													</div>
+												) : (
+													<div className="flex items-center gap-1.5">
+														<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
+															{list.name}
+														</Link>
+														<button
+															type="button"
+															onClick={() => openRenameList(list)}
+															disabled={renamingListId === list.id}
+															className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+															title="Editar nombre"
+														>
+															Editar
+														</button>
+													</div>
+												)}
 												<p className="mt-1 text-xs text-slate-500">
 													<span className="sm:hidden">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
 													<span className="hidden sm:inline">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
