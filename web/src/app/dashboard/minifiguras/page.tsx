@@ -6,6 +6,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { getHiddenSearchTagsForMinifigure } from "@/lib/minifigure-search-tags";
 
 const MINIFIGURAS_THEME_IDS_KEY = "minifiguras_theme_ids";
+const MINIFIGURAS_FAVORITE_THEME_IDS_KEY = "minifiguras_favorite_theme_ids";
 const MINIFIGURAS_OWNED_KEY = "minifiguras_owned";
 const MINIFIGURAS_PARTS_UNCHECKED_KEY = "minifiguras_parts_unchecked";
 const MINIFIGURAS_MISSING_PARTS_KEY = "minifiguras_missing_parts";
@@ -160,14 +161,19 @@ export default function MinifigurasPage() {
 	const [missingSeriesFilterThemeId, setMissingSeriesFilterThemeId] = useState<number | null>(null);
 	const [themes, setThemes] = useState<MinifigureTheme[]>([]);
 	const [selectedThemeIds, setSelectedThemeIds] = useState<number[]>([]);
+	const [favoriteThemeIds, setFavoriteThemeIds] = useState<number[]>([]);
+	const [showOnlyFavoriteThemes, setShowOnlyFavoriteThemes] = useState(false);
 	const [loadingThemes, setLoadingThemes] = useState(false);
 	const [themeError, setThemeError] = useState<string | null>(null);
 	const [selectionStatus, setSelectionStatus] = useState<string | null>(null);
+	const [favoriteStatus, setFavoriteStatus] = useState<string | null>(null);
 	const [ownedStatus, setOwnedStatus] = useState<string | null>(null);
 	const [expandedThemeIds, setExpandedThemeIds] = useState<number[]>([]);
 	const [figuresByThemeId, setFiguresByThemeId] = useState<Record<number, MinifigureEntry[]>>({});
 	const [loadingFiguresByThemeId, setLoadingFiguresByThemeId] = useState<Record<number, boolean>>({});
 	const [showPartsModal, setShowPartsModal] = useState(false);
+	const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+	const [resettingCollection, setResettingCollection] = useState(false);
 	const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
 	const [zoomImageName, setZoomImageName] = useState("");
 	const [partsModalTitle, setPartsModalTitle] = useState("");
@@ -257,6 +263,14 @@ export default function MinifigurasPage() {
 
 				setSelectedThemeIds([...new Set(parsed)]);
 
+				const favoritesSaved = metadata[MINIFIGURAS_FAVORITE_THEME_IDS_KEY];
+				const parsedFavorites = Array.isArray(favoritesSaved)
+					? favoritesSaved
+							.map((value) => Number(value))
+							.filter((value) => Number.isFinite(value) && value > 0)
+					: [];
+				setFavoriteThemeIds([...new Set(parsedFavorites)]);
+
 				const ownedRaw = metadata[MINIFIGURAS_OWNED_KEY];
 				if (ownedRaw && typeof ownedRaw === "object" && !Array.isArray(ownedRaw)) {
 					const nextOwned: Record<string, boolean> = {};
@@ -337,6 +351,51 @@ export default function MinifigurasPage() {
 		}
 	}
 
+	async function saveFavoriteThemes(themeIds: number[]) {
+		try {
+			setFavoriteStatus("Guardando favoritas...");
+			const supabase = getSupabaseClient();
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+
+			if (!user) {
+				setFavoriteStatus("Inicia sesion para guardar favoritas.");
+				return;
+			}
+
+			const baseMetadata = {
+				...((user.user_metadata ?? {}) as Record<string, unknown>),
+				...userMetadataRef.current,
+			};
+
+			const nextMetadata = {
+				...baseMetadata,
+				[MINIFIGURAS_FAVORITE_THEME_IDS_KEY]: themeIds,
+			};
+			userMetadataRef.current = nextMetadata;
+
+			const { data, error } = await supabase.auth.updateUser({ data: nextMetadata });
+			if (error) {
+				setFavoriteStatus("No se pudo guardar favoritas.");
+				return;
+			}
+
+			userMetadataRef.current = (data.user?.user_metadata ?? nextMetadata) as Record<string, unknown>;
+			setFavoriteStatus("Favoritas guardadas.");
+		} catch {
+			setFavoriteStatus("No se pudo guardar favoritas.");
+		}
+	}
+
+	function toggleFavoriteTheme(themeId: number) {
+		setFavoriteThemeIds((current) => {
+			const next = current.includes(themeId) ? current.filter((id) => id !== themeId) : [...current, themeId];
+			void saveFavoriteThemes(next);
+			return next;
+		});
+	}
+
 	function openFilterModal() {
 		setShowFilterModal(true);
 		void loadThemes();
@@ -345,6 +404,23 @@ export default function MinifigurasPage() {
 	function toggleTheme(themeId: number) {
 		setSelectedThemeIds((current) => {
 			const next = current.includes(themeId) ? current.filter((id) => id !== themeId) : [...current, themeId];
+			void saveThemeSelection(next);
+			return next;
+		});
+	}
+
+	function selectAllVisibleThemes(themeIds: number[]) {
+		setSelectedThemeIds((current) => {
+			const next = [...new Set([...current, ...themeIds])];
+			void saveThemeSelection(next);
+			return next;
+		});
+	}
+
+	function deselectAllVisibleThemes(themeIds: number[]) {
+		const idsToRemove = new Set(themeIds);
+		setSelectedThemeIds((current) => {
+			const next = current.filter((id) => !idsToRemove.has(id));
 			void saveThemeSelection(next);
 			return next;
 		});
@@ -719,6 +795,77 @@ export default function MinifigurasPage() {
 		setZoomImageName(name);
 	}
 
+	async function resetMinifigureCollection() {
+		setResettingCollection(true);
+		setSelectionStatus(null);
+		setOwnedStatus(null);
+		setFavoriteStatus(null);
+		setPartsSaveStatus(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+
+			if (!user) {
+				setSelectionStatus("Inicia sesion para reiniciar la coleccion.");
+				return;
+			}
+
+			const baseMetadata = {
+				...((user.user_metadata ?? {}) as Record<string, unknown>),
+				...userMetadataRef.current,
+			};
+
+			const nextMetadata = {
+				...baseMetadata,
+				[MINIFIGURAS_THEME_IDS_KEY]: [],
+				[MINIFIGURAS_FAVORITE_THEME_IDS_KEY]: [],
+				[MINIFIGURAS_OWNED_KEY]: {},
+				[MINIFIGURAS_PARTS_UNCHECKED_KEY]: {},
+				[MINIFIGURAS_MISSING_PARTS_KEY]: {},
+			};
+			userMetadataRef.current = nextMetadata;
+
+			const { data, error } = await supabase.auth.updateUser({ data: nextMetadata });
+			if (error) {
+				setSelectionStatus("No se pudo reiniciar la coleccion de minifiguras.");
+				return;
+			}
+
+			await syncMissingPartsList(user.id, {});
+
+			userMetadataRef.current = (data.user?.user_metadata ?? nextMetadata) as Record<string, unknown>;
+			partsUncheckedRef.current = {};
+			missingPartsRef.current = {};
+			allFiguresLoadedForSearchRef.current = false;
+			setSelectedThemeIds([]);
+			setFavoriteThemeIds([]);
+			setOwnedByFigureKey({});
+			setMissingPartsByFigureKey({});
+			setPartsCheckedByKey({});
+			setPartsRows([]);
+			setFiguresByThemeId({});
+			setLoadingFiguresByThemeId({});
+			setExpandedThemeIds([]);
+			setSearchInput("");
+			setShowOnlyFavoriteThemes(false);
+			setViewMode("all");
+			setMissingSeriesFilterThemeId(null);
+			setShowFilterModal(false);
+			setShowPartsModal(false);
+			setZoomImageUrl(null);
+			setZoomImageName("");
+			setShowResetConfirmModal(false);
+			setSelectionStatus("Coleccion de minifiguras reiniciada.");
+		} catch {
+			setSelectionStatus("No se pudo reiniciar la coleccion de minifiguras.");
+		} finally {
+			setResettingCollection(false);
+		}
+	}
+
 	async function loadFiguresForTheme(themeId: number): Promise<MinifigureEntry[]> {
 		if (figuresByThemeId[themeId]) return figuresByThemeId[themeId] ?? [];
 		if (loadingFiguresByThemeId[themeId]) return figuresByThemeId[themeId] ?? [];
@@ -847,6 +994,11 @@ export default function MinifigurasPage() {
 		return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
 	});
 
+	const visibleThemesInFilter = showOnlyFavoriteThemes
+		? sortedThemes.filter((theme) => favoriteThemeIds.includes(theme.id))
+		: sortedThemes;
+    const visibleThemeIdsInFilter = visibleThemesInFilter.map((theme) => theme.id);
+
 	const missingSeriesThemeName =
 		missingSeriesFilterThemeId !== null
 			? themes.find((theme) => theme.id === missingSeriesFilterThemeId)?.name ?? `Serie ${missingSeriesFilterThemeId}`
@@ -858,9 +1010,18 @@ export default function MinifigurasPage() {
 				<div className="border-b border-slate-200 pb-4">
 					<div className="flex items-center justify-between gap-3">
 						<h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Minifiguras</h1>
-						<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
-							← Volver
-						</Link>
+						<div className="flex flex-col items-end gap-2">
+							<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
+								← Volver
+							</Link>
+							<button
+								type="button"
+								onClick={() => setShowResetConfirmModal(true)}
+								className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+							>
+								Reset
+							</button>
+						</div>
 					</div>
 					<div className="mt-2 space-y-1 text-xs text-slate-700">
 						<p>Completas: {ownedComplete}</p>
@@ -1039,6 +1200,37 @@ export default function MinifigurasPage() {
 				</div>
 			</main>
 
+			{showResetConfirmModal ? (
+				<div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4" onClick={() => !resettingCollection && setShowResetConfirmModal(false)}>
+					<div className="w-full max-w-xs rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+						<div className="flex flex-col items-center text-center">
+							<img src="/LEGO-ICON_A.svg" alt="Lego icon" className="h-28 w-28 object-contain" />
+							<p className="mt-3 text-base font-bold text-slate-700">Estas seguro de querer desarmar tu coleccion de minifiguras?</p>
+							<p className="mt-1 text-sm text-slate-700">Si lo haces vas a volver a empezar esta seccion.</p>
+							<div className="mt-5 flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => void resetMinifigureCollection()}
+									disabled={resettingCollection}
+									className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+								>
+									{resettingCollection ? "Reiniciando..." : "Si"}
+								</button>
+							<button
+								type="button"
+								onClick={() => setShowResetConfirmModal(false)}
+								autoFocus
+								disabled={resettingCollection}
+								className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+							>
+								No
+							</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			) : null}
+
 			{zoomImageUrl ? (
 				<div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/85 p-4" onClick={() => setZoomImageUrl(null)}>
 					<div className="relative w-full max-w-5xl" onClick={(event) => event.stopPropagation()}>
@@ -1150,7 +1342,37 @@ export default function MinifigurasPage() {
 						onClick={(event) => event.stopPropagation()}
 					>
 						<div className="flex items-center justify-between border-b border-slate-200 pb-2">
-							<p className="text-sm font-semibold text-slate-900">Collectable Minifigures</p>
+							<div>
+								<div className="flex items-center gap-3">
+									<p className="text-sm font-semibold text-slate-900">Colecciones de Serie</p>
+									<button
+										type="button"
+										onClick={() => setShowOnlyFavoriteThemes((current) => !current)}
+										className={`text-xl leading-none ${showOnlyFavoriteThemes ? "text-yellow-500" : "text-slate-500 hover:text-slate-700"}`}
+										title="Mostrar solo favoritas"
+									>
+										{showOnlyFavoriteThemes ? "★" : "☆"}
+									</button>
+								</div>
+								<div className="mt-2 flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => selectAllVisibleThemes(visibleThemeIdsInFilter)}
+										disabled={visibleThemeIdsInFilter.length === 0}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										Seleccionar todos
+									</button>
+									<button
+										type="button"
+										onClick={() => deselectAllVisibleThemes(visibleThemeIdsInFilter)}
+										disabled={visibleThemeIdsInFilter.length === 0}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										Deseleccionar todos
+									</button>
+								</div>
+							</div>
 							<button
 								type="button"
 								onClick={() => setShowFilterModal(false)}
@@ -1163,11 +1385,18 @@ export default function MinifigurasPage() {
 						{loadingThemes ? <p className="mt-3 text-sm text-slate-600">Cargando series...</p> : null}
 						{themeError ? <p className="mt-3 text-sm text-red-600">{themeError}</p> : null}
 						{selectionStatus ? <p className="mt-3 text-xs text-slate-600">{selectionStatus}</p> : null}
+						{favoriteStatus ? <p className="mt-1 text-xs text-slate-600">{favoriteStatus}</p> : null}
 
 						{!loadingThemes && !themeError ? (
 							<ul className="mt-3 max-h-80 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
-								{sortedThemes.map((theme) => {
+								{visibleThemesInFilter.length === 0 ? (
+									<li className="rounded-md border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500">
+										No hay series favoritas.
+									</li>
+								) : null}
+								{visibleThemesInFilter.map((theme) => {
 									const selected = selectedThemeIds.includes(theme.id);
+									const isFavorite = favoriteThemeIds.includes(theme.id);
 									const expanded = expandedThemeIds.includes(theme.id);
 									const fallbackTotal = (figuresByThemeId[theme.id] ?? []).length;
 									const totalInTheme = typeof theme.itemCount === "number" && theme.itemCount > 0 ? theme.itemCount : fallbackTotal;
@@ -1214,6 +1443,14 @@ export default function MinifigurasPage() {
 													</div>
 												</button>
 												<div className="flex items-center gap-1">
+													<button
+														type="button"
+														onClick={() => toggleFavoriteTheme(theme.id)}
+														className={`text-lg leading-none ${isFavorite ? "text-yellow-500" : "text-slate-500 hover:text-slate-700"}`}
+														title={isFavorite ? "Quitar de favoritas" : "Marcar como favorita"}
+													>
+														{isFavorite ? "★" : "☆"}
+													</button>
 													<button
 														type="button"
 														onClick={() => toggleExpandedTheme(theme.id)}

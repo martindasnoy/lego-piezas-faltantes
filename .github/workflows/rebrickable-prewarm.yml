@@ -44,7 +44,7 @@ jobs:
           failures=0
           for theme_id in $theme_ids; do
             echo "Prewarming minifigure theme $theme_id"
-            if ! curl -sS --fail --retry 4 --retry-delay 3 --retry-all-errors -X POST "$BASE_URL/api/rebrickable/prewarm?minifigure_theme_id=$theme_id" -H "x-prewarm-token: $TOKEN" > /dev/null; then
+            if ! curl -sS --fail --retry 4 --retry-delay 3 --retry-all-errors -X POST "$BASE_URL/api/rebrickable/prewarm?minifigure_theme_id=$theme_id&include_parts=1" -H "x-prewarm-token: $TOKEN" > /dev/null; then
               echo "Warning: minifigure prewarm failed for theme $theme_id"
               failures=$((failures + 1))
             fi

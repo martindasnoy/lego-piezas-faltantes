@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
+import { toRebrickableImageProxyUrl } from "@/lib/rebrickable-image-proxy";
 
 const REBRICKABLE_PARTS_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const FALLBACK_COLOR_NAMES = [
@@ -171,5 +172,10 @@ export async function POST(request: Request) {
 		}),
 	);
 
-	return NextResponse.json({ results });
+	const proxied = results.map((result) => ({
+		...result,
+		part_img_url: toRebrickableImageProxyUrl(result.part_img_url) ?? null,
+	}));
+
+	return NextResponse.json({ results: proxied });
 }

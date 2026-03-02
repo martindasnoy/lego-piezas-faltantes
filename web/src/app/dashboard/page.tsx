@@ -9,6 +9,7 @@ import { getRandomLoadingMessage } from "@/lib/loading-messages";
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
+const USER_FACE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 type UserList = {
 	id: string;
@@ -38,6 +39,7 @@ export default function DashboardPage() {
 	const [showUserSettings, setShowUserSettings] = useState(false);
 	const [settingsNameInput, setSettingsNameInput] = useState("");
 	const [settingsEmailInput, setSettingsEmailInput] = useState("");
+	const [selectedFace, setSelectedFace] = useState(1);
 	const [showPasswordModal, setShowPasswordModal] = useState(false);
 	const [currentPasswordInput, setCurrentPasswordInput] = useState("");
 	const [newPasswordInput, setNewPasswordInput] = useState("");
@@ -137,6 +139,8 @@ export default function DashboardPage() {
 
 				setUserEmail(user.email ?? "");
 				setDisplayName((user.user_metadata?.display_name as string) ?? "");
+				const storedFace = Number(user.user_metadata?.minifig_face ?? 1);
+				setSelectedFace(Number.isFinite(storedFace) && storedFace >= 1 && storedFace <= 9 ? storedFace : 1);
 				await loadLists(user.id);
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir el dashboard.";
@@ -300,6 +304,7 @@ export default function DashboardPage() {
 	function openUserSettings() {
 		setSettingsNameInput(displayName || "");
 		setSettingsEmailInput(userEmail || "");
+		setSelectedFace((current) => (Number.isFinite(current) && current >= 1 && current <= 9 ? current : 1));
 		setShowPasswordModal(false);
 		setCurrentPasswordInput("");
 		setNewPasswordInput("");
@@ -323,12 +328,14 @@ export default function DashboardPage() {
 			const nextName = settingsNameInput.trim();
 			const nextEmail = settingsEmailInput.trim().toLowerCase();
 
+			const faceValue = Number.isFinite(selectedFace) && selectedFace >= 1 && selectedFace <= 9 ? selectedFace : 1;
 			const updatePayload: {
-				data: { display_name: string };
+				data: { display_name: string; minifig_face: number };
 				email?: string;
 			} = {
 				data: {
 					display_name: nextName,
+					minifig_face: faceValue,
 				},
 			};
 
@@ -344,6 +351,7 @@ export default function DashboardPage() {
 			}
 
 			setDisplayName(nextName);
+			setSelectedFace(faceValue);
 			if (nextEmail) {
 				setUserEmail(nextEmail);
 			}
@@ -419,19 +427,22 @@ export default function DashboardPage() {
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
 					<div>
-						<div className="flex items-center gap-2">
-							<h1 className="break-all text-3xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
-							<button
-								type="button"
-								onClick={openUserSettings}
-								className="rounded-md border border-slate-300 p-1.5 text-slate-700 hover:bg-slate-50"
-								aria-label="Configuracion de usuario"
-							>
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
-									<path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
-									<path d="m19.4 13.5.1-3-1.9-.5a6 6 0 0 0-.6-1.4l1-1.7-2.1-2.1-1.7 1a6 6 0 0 0-1.4-.6L12.5 3h-3l-.5 1.9a6 6 0 0 0-1.4.6l-1.7-1-2.1 2.1 1 1.7a6 6 0 0 0-.6 1.4L3 10.5v3l1.9.5a6 6 0 0 0 .6 1.4l-1 1.7 2.1 2.1 1.7-1a6 6 0 0 0 1.4.6l.5 1.9h3l.5-1.9a6 6 0 0 0 1.4-.6l1.7 1 2.1-2.1-1-1.7a6 6 0 0 0 .6-1.4l1.9-.5Z" />
-								</svg>
-							</button>
+						<div className="flex items-center justify-between gap-3">
+							<div className="flex min-w-0 items-center gap-2">
+								<h1 className="break-all text-3xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
+								<button
+									type="button"
+									onClick={openUserSettings}
+									className="rounded-md border border-slate-300 p-1.5 text-slate-700 hover:bg-slate-50"
+									aria-label="Configuracion de usuario"
+								>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+										<path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
+										<path d="m19.4 13.5.1-3-1.9-.5a6 6 0 0 0-.6-1.4l1-1.7-2.1-2.1-1.7 1a6 6 0 0 0-1.4-.6L12.5 3h-3l-.5 1.9a6 6 0 0 0-1.4.6l-1.7-1-2.1 2.1 1 1.7a6 6 0 0 0-.6 1.4L3 10.5v3l1.9.5a6 6 0 0 0 .6 1.4l-1 1.7 2.1 2.1 1.7-1a6 6 0 0 0 1.4.6l.5 1.9h3l.5-1.9a6 6 0 0 0 1.4-.6l1.7 1 2.1-2.1-1-1.7a6 6 0 0 0 .6-1.4l1.9-.5Z" />
+									</svg>
+								</button>
+							</div>
+							<img src={`/Cara_minifig_${selectedFace}.svg`} alt="Avatar minifig" className="h-20 w-20 shrink-0 object-contain" />
 						</div>
 					</div>
 				</header>
@@ -484,7 +495,15 @@ export default function DashboardPage() {
 								lists.map((list) => (
 									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
 										<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-											<div>
+											<div className="flex items-start gap-3">
+												<div className="h-14 w-14 shrink-0 overflow-hidden">
+													<img
+														src={list.is_auto_generated ? "/Minifigura_silueta_B.png?v=5" : "/pieza_silueta.png?v=5"}
+														alt={list.is_auto_generated ? "Minifiguras" : "Piezas"}
+														className={`h-14 w-14 object-contain ${list.is_auto_generated ? "" : "-translate-x-1"}`}
+													/>
+												</div>
+												<div>
 												{editingListId === list.id ? (
 													<div className="flex flex-wrap items-center gap-2">
 														<input
@@ -531,6 +550,7 @@ export default function DashboardPage() {
 													<span className="sm:hidden">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
 													<span className="hidden sm:inline">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
 												</p>
+												</div>
 											</div>
 										<div className="w-full md:w-auto">
 											<div className="flex flex-wrap items-center justify-between gap-2 md:flex-col md:items-end md:justify-start">
@@ -577,6 +597,7 @@ export default function DashboardPage() {
 										</Link>
 										<p className="mt-1 text-xs text-white/90">Lista automatica. Resume tus "Yo tengo".</p>
 									</div>
+									<img src="/handShake.png?v=2" alt="Items ofertados" className="h-[60px] w-[60px] shrink-0 object-contain" />
 								</div>
 							</li>
 						</ul>
@@ -679,6 +700,21 @@ export default function DashboardPage() {
 							>
 								Cambiar contrasena
 							</button>
+							<div className="mt-4 grid grid-cols-3 gap-2">
+								{USER_FACE_OPTIONS.map((faceNum) => {
+									const isSelected = selectedFace === faceNum;
+									return (
+										<button
+											key={faceNum}
+											type="button"
+											onClick={() => setSelectedFace(faceNum)}
+											className={`flex aspect-square w-full items-center justify-center rounded-md border p-1 ${isSelected ? "border-[#006eb2] bg-[#cfeeff]" : "border-slate-200 bg-slate-50"}`}
+										>
+											<img src={`/Cara_minifig_${faceNum}.svg`} alt={`Cara minifig ${faceNum}`} className="h-full w-full object-contain" />
+										</button>
+									);
+								})}
+							</div>
 							<div className="mt-4 flex justify-end gap-2">
 								<button
 									type="button"
