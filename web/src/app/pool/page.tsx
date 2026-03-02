@@ -13,6 +13,7 @@ const AUTO_MINIFIG_LIST_NAMES = [
 	"Pares Faltantes de Minifcuras",
 	"Faltantes Minifiguras",
 ];
+const SALE_LIST_PREFIX = "venta:";
 
 type PoolLot = {
 	id: string;
@@ -65,6 +66,11 @@ export default function PoolPage() {
 	function isMinifigurePartsListName(listName: string | null | undefined) {
 		const normalized = String(listName ?? "").trim();
 		return AUTO_MINIFIG_LIST_NAMES.includes(normalized);
+	}
+
+	function isSaleListName(listName: string | null | undefined) {
+		const normalized = String(listName ?? "").trim().toLowerCase();
+		return normalized.startsWith(SALE_LIST_PREFIX);
 	}
 
 	useEffect(() => {
@@ -317,6 +323,7 @@ export default function PoolPage() {
 
 	const filteredLots = useMemo<PoolLot[]>(() => {
 		return publicLots.filter((lot) => {
+			if (isSaleListName(lot.list_name)) return false;
 			const isMinifigLot = isMinifigurePartsListName(lot.list_name);
 			if (isMinifigLot && !showMinifigurePartsLots) return false;
 			if (!isMinifigLot && !showPiecesLots) return false;

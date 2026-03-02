@@ -10,6 +10,7 @@ import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-cat
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
+const SALE_LIST_PREFIX = "venta:";
 
 type ListInfo = {
 	id: string;
@@ -23,6 +24,7 @@ type Lot = {
 	part_num: string;
 	color_name: string | null;
 	quantity: number;
+	value: number | null;
 };
 
 type PartSuggestion = {
@@ -77,14 +79,17 @@ export default function ListDetailPage() {
 	const [showColorSuggestions, setShowColorSuggestions] = useState(false);
 	const [useBricklinkNomenclature, setUseBricklinkNomenclature] = useState(true);
 	const [quantityInput, setQuantityInput] = useState(1);
+	const [valueInput, setValueInput] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [updatingLotId, setUpdatingLotId] = useState<string | null>(null);
+	const [updatingLotValueId, setUpdatingLotValueId] = useState<string | null>(null);
 	const [updatingLotColorId, setUpdatingLotColorId] = useState<string | null>(null);
 	const [colorPickerLotId, setColorPickerLotId] = useState<string | null>(null);
 	const [colorPickerSearch, setColorPickerSearch] = useState("");
 	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
+	const [offerDetailsLotId, setOfferDetailsLotId] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
 	const [showImportExportModal, setShowImportExportModal] = useState(false);
@@ -173,11 +178,39 @@ export default function ListDetailPage() {
 		});
 	}, [availableColors, colorPickerSearch]);
 
+	const activeOfferDetailsLot = useMemo(() => {
+		if (!offerDetailsLotId) return null;
+		return lots.find((lot) => lot.id === offerDetailsLotId) ?? null;
+	}, [offerDetailsLotId, lots]);
+
+	const activeOfferDetailsSummary = useMemo(() => {
+		if (!offerDetailsLotId) return null;
+		return offersByLot[offerDetailsLotId] ?? null;
+	}, [offerDetailsLotId, offersByLot]);
+
 	function normalizePartCodeInput(raw: string) {
 		const trimmed = raw.trim();
 		if (!trimmed) return "";
 		const firstToken = trimmed.split(" - ")[0]?.trim() ?? "";
 		return firstToken.replace(/^#+\s*/, "").trim().toUpperCase();
+	}
+
+	function isSaleListName(listName: string | null | undefined) {
+		return String(listName ?? "").trim().toLowerCase().startsWith(SALE_LIST_PREFIX);
+	}
+
+	function getDisplayListName(listName: string | null | undefined) {
+		const raw = String(listName ?? "");
+		if (!isSaleListName(raw)) return raw;
+		return raw.replace(/^venta:\s*/i, "").trim();
+	}
+
+	function parseValueInput(raw: string) {
+		const normalized = raw.trim().replace(/,/g, ".");
+		if (!normalized) return null;
+		const parsed = Number(normalized);
+		if (!Number.isFinite(parsed) || parsed < 0) return null;
+		return Math.round(parsed);
 	}
 
 	const filteredCatalogCategories = useMemo(() => {
@@ -281,16 +314,39 @@ export default function ListDetailPage() {
 
 				setList(listData as ListInfo);
 
-				const { data: lotRows, error: lotError } = await supabase
+				let lotRows: Array<Partial<Lot>> | null = null;
+				let lotError: { message?: string } | null = null;
+
+				const withValue = await supabase
 					.from("list_items")
-					.select("id,part_name,part_num,color_name,quantity")
+					.select("id,part_name,part_num,color_name,quantity,value")
 					.eq("list_id", listId)
 					.order("created_at", { ascending: false });
+
+				lotRows = (withValue.data as Array<Partial<Lot>> | null) ?? null;
+				lotError = withValue.error;
+
+				if (lotError && /value/i.test(lotError.message ?? "")) {
+					const fallback = await supabase
+						.from("list_items")
+						.select("id,part_name,part_num,color_name,quantity")
+						.eq("list_id", listId)
+						.order("created_at", { ascending: false });
+					lotRows = (fallback.data as Array<Partial<Lot>> | null) ?? null;
+					lotError = fallback.error;
+				}
 
 				if (lotError) {
 					setMessage("No se pudieron cargar los lotes de esta lista.");
 				} else {
-					const loadedLots = (lotRows as Lot[]) ?? [];
+					const loadedLots = ((lotRows as Array<Partial<Lot>>) ?? []).map((lot) => ({
+						id: String(lot.id ?? ""),
+						part_name: typeof lot.part_name === "string" ? lot.part_name : null,
+						part_num: String(lot.part_num ?? ""),
+						color_name: typeof lot.color_name === "string" ? lot.color_name : null,
+						quantity: Number(lot.quantity ?? 0),
+						value: typeof lot.value === "number" ? lot.value : null,
+					}));
 					setLots(loadedLots);
 					void loadPartImages(
 						loadedLots.map((lot) => ({
@@ -549,6 +605,8 @@ export default function ListDetailPage() {
 			const piece = normalizePartCodeInput(partInput);
 			const partNum = selectedPart?.part_num || piece;
 			const partName = selectedPart?.name || partNum;
+			const isSaleList = isSaleListName(list?.name);
+			const value = parseValueInput(valueInput);
 			const selectedColorName = selectedColor
 				? useBricklinkNomenclature
 					? selectedColor.blName?.trim() || selectedColor.name
@@ -572,6 +630,12 @@ export default function ListDetailPage() {
 				return;
 			}
 
+			if (isSaleList && value === null) {
+				setMessage("El valor debe ser un numero mayor o igual a 0.");
+				setSaving(false);
+				return;
+			}
+
 			const { data, error } = await supabase
 				.from("list_items")
 				.insert({
@@ -580,8 +644,9 @@ export default function ListDetailPage() {
 					part_name: partName,
 					color_name: color || null,
 					quantity,
+					value: isSaleList ? value : null,
 				})
-				.select("id,part_name,part_num,color_name,quantity")
+				.select("id,part_name,part_num,color_name,quantity,value")
 				.single();
 
 			if (error) {
@@ -607,6 +672,7 @@ export default function ListDetailPage() {
 			setSelectedColor(null);
 			setShowColorSuggestions(false);
 			setQuantityInput(1);
+			setValueInput("");
 		} catch (error) {
 			const text = error instanceof Error ? error.message : "No se pudo crear el lote.";
 			setMessage(text);
@@ -949,9 +1015,9 @@ export default function ListDetailPage() {
 	}
 
 	function buildGenericExportCsv() {
-		const header = "part_num,part_name,color_name,quantity";
+		const header = "part_num,part_name,color_name,quantity,value";
 		const rows = lots.map((lot) => {
-			const values = [lot.part_num, lot.part_name || "", lot.color_name || "", String(lot.quantity || 1)].map((value) => `"${String(value).replace(/\"/g, '""')}"`);
+			const values = [lot.part_num, lot.part_name || "", lot.color_name || "", String(lot.quantity || 1), lot.value == null ? "" : String(lot.value)].map((value) => `"${String(value).replace(/\"/g, '""')}"`);
 			return values.join(",");
 		});
 		return [header, ...rows].join("\n");
@@ -1025,9 +1091,10 @@ export default function ListDetailPage() {
 						part_name: row.part_name,
 						color_name: row.color_name,
 						quantity: row.quantity,
+						value: null,
 					})),
 				)
-				.select("id,part_name,part_num,color_name,quantity");
+				.select("id,part_name,part_num,color_name,quantity,value");
 
 			if (error) {
 				setMessage(error.message);
@@ -1062,6 +1129,10 @@ export default function ListDetailPage() {
 		);
 	}
 
+	function setLocalLotValue(lotId: string, nextValue: number | null) {
+		setLots((current) => current.map((lot) => (lot.id === lotId ? { ...lot, value: nextValue } : lot)));
+	}
+
 	function setLocalLotColor(lotId: string, nextColorName: string | null) {
 		setLots((current) => current.map((lot) => (lot.id === lotId ? { ...lot, color_name: nextColorName } : lot)));
 	}
@@ -1083,6 +1154,31 @@ export default function ListDetailPage() {
 			setLocalLotQuantity(lotId, quantity);
 		} finally {
 			setUpdatingLotId(null);
+		}
+	}
+
+	async function persistLotValue(lotId: string, nextValueRaw: string) {
+		const parsed = parseValueInput(nextValueRaw);
+		if (parsed === null) {
+			setMessage("El valor debe ser un numero mayor o igual a 0.");
+			return;
+		}
+
+		setUpdatingLotValueId(lotId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("list_items").update({ value: parsed }).eq("id", lotId);
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			setLocalLotValue(lotId, parsed);
+		} finally {
+			setUpdatingLotValueId(null);
 		}
 	}
 
@@ -1165,6 +1261,8 @@ export default function ListDetailPage() {
 	}
 
 	const isAutoMinifigList = [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES].includes(list.name.trim());
+	const isSaleList = isSaleListName(list.name);
+	const displayListName = getDisplayListName(list.name);
 
 	return (
 		<div className="min-h-screen bg-[#5bb9e8] px-4 py-6 sm:bg-[#006eb2] sm:px-6 sm:py-8">
@@ -1175,7 +1273,7 @@ export default function ListDetailPage() {
 							← Volver
 						</Link>
 						<div className="order-2 sm:order-1">
-							<h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Lista de deseo {list.name.toLocaleUpperCase("es-AR")}</h1>
+							<h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">{isSaleList ? "Lista de venta" : "Lista de deseo"} {displayListName.toLocaleUpperCase("es-AR")}</h1>
 							<div className="mt-2 hidden justify-start">
 								<button
 									type="button"
@@ -1201,13 +1299,18 @@ export default function ListDetailPage() {
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 						<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
-						<button
-							type="button"
-							onClick={() => void openCatalogModal()}
-							className="w-full rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a] sm:w-auto"
-						>
-							Por Catálogo
-						</button>
+						<div className="group relative">
+							<button
+								type="button"
+								onClick={() => void openCatalogModal()}
+								className="w-full rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a] sm:w-auto"
+							>
+								Por Catálogo
+							</button>
+							<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+								Busca en el catalogo de Rebrickable para encontrar tu pieza.
+							</div>
+						</div>
 					</div>
 					<form onSubmit={createLot} className="mt-4 space-y-4">
 						<div className="relative sm:col-span-3">
@@ -1253,7 +1356,7 @@ export default function ListDetailPage() {
 							) : null}
 						</div>
 
-						<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_200px] md:items-start">
+						<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
 							<div ref={colorDropdownRef} className="relative">
 								<input
 									type="text"
@@ -1299,7 +1402,7 @@ export default function ListDetailPage() {
 										))}
 									</ul>
 								) : null}
-								<div className="mt-2 flex gap-2">
+								<div className="group relative mt-2 flex gap-2">
 									<button
 										type="button"
 										onClick={() => {
@@ -1322,19 +1425,39 @@ export default function ListDetailPage() {
 									>
 										Color LEGO
 									</button>
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										Elegi el estilo de nomenclatura para el color.
+									</div>
 								</div>
 							</div>
 
 							<div className="flex flex-col items-end gap-2">
-								<div className="w-28">
-									<input
-										type="number"
-										min={1}
-										step={1}
-										value={quantityInput}
-										onChange={(event) => setQuantityInput(Number(event.target.value))}
-										className="quantity-input w-full appearance-auto rounded-lg border border-slate-300 px-2 py-2 text-center text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-									/>
+								<div className="flex w-full items-center justify-end gap-2">
+									{isSaleList ? (
+										<div className="relative w-24">
+											<span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm font-bold text-white">$</span>
+											<input
+												type="number"
+												min={0}
+												step={1}
+												inputMode="numeric"
+												value={valueInput}
+												onChange={(event) => setValueInput(event.target.value)}
+												placeholder="0"
+												className="w-full rounded-lg border border-[#005f9a] bg-[#006eb2] py-2 pl-5 pr-2 text-center font-bold text-white outline-none transition focus:border-[#006eb2] focus:ring-2 focus:ring-blue-200 placeholder:text-white/70"
+											/>
+										</div>
+									) : null}
+									<div className="w-24">
+										<input
+											type="number"
+											min={1}
+											step={1}
+											value={quantityInput}
+											onChange={(event) => setQuantityInput(Number(event.target.value))}
+											className="quantity-input w-full appearance-auto rounded-lg border border-slate-300 px-2 py-2 text-center text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+										/>
+									</div>
 								</div>
 								<button
 									type="submit"
@@ -1377,23 +1500,29 @@ export default function ListDetailPage() {
 												<p className="overflow-hidden text-slate-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] sm:max-w-[520px]">
 													{lot.part_name || "Sin nombre"}
 												</p>
-												<div
-													className={`w-fit max-w-full rounded-md px-3 py-1 text-xs ${offersByLot[String(lot.id)] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}
-												>
-													{(() => {
-														const summary = offersByLot[String(lot.id)];
-														if (!summary) return "Sin ofertas";
-
-														const offeredPieces = Number(summary.pieces ?? 0);
-														const neededPieces = Number(lot.quantity ?? 0);
-														const isComplete = offeredPieces >= neededPieces;
-														const usersCount = summary.byUser.length;
-
-														if (!isComplete) return `${offeredPieces}/${neededPieces} ofrecidas`;
-														if (usersCount === 1) return summary.byUser[0]?.name || "1 oferta";
-														return `${usersCount} ofertas`;
-													})()}
-												</div>
+												{offersByLot[String(lot.id)] ? (
+													<div className="group relative">
+														<button
+															type="button"
+															onClick={() => setOfferDetailsLotId(String(lot.id))}
+															className="w-fit max-w-full rounded-md bg-emerald-100 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-200"
+														>
+															Ya tuviste ofertas
+														</button>
+														<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+															Bravo! se encontraron piezas!
+														</div>
+													</div>
+												) : (
+													<div className="group relative">
+														<div className="w-fit max-w-full rounded-md bg-slate-200 px-3 py-1 text-xs text-slate-600">
+															Sin ofertas
+														</div>
+														<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+															Todavia nadie encontro esta pieza
+														</div>
+													</div>
+												)}
 											</div>
 
 									<div className="mt-2 flex items-center justify-between gap-2">
@@ -1416,11 +1545,11 @@ export default function ListDetailPage() {
 												type="number"
 												min={1}
 												value={lot.quantity}
-														onChange={(event) => {
-															const parsed = Number(event.target.value);
-															if (!Number.isFinite(parsed)) return;
-															setLocalLotQuantity(lot.id, Math.max(1, parsed));
-														}}
+												onChange={(event) => {
+													const parsed = Number(event.target.value);
+													if (!Number.isFinite(parsed)) return;
+													setLocalLotQuantity(lot.id, Math.max(1, parsed));
+												}}
 												onBlur={(event) => {
 													const parsed = Number(event.target.value);
 													void persistLotQuantity(lot.id, Number.isFinite(parsed) ? parsed : lot.quantity);
@@ -1428,6 +1557,32 @@ export default function ListDetailPage() {
 												disabled={updatingLotId === lot.id}
 												className="quantity-input w-10 appearance-auto rounded border border-slate-300 px-1 py-0.5 text-center text-xs disabled:opacity-50 sm:w-16 sm:px-2 sm:py-1 sm:text-sm"
 											/>
+											{isSaleList ? (
+												<div className="relative w-16 sm:w-24">
+													<span className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-white sm:left-2 sm:text-xs">$</span>
+													<input
+														type="number"
+														min={0}
+														step={1}
+														inputMode="numeric"
+														value={lot.value ?? ""}
+														onChange={(event) => {
+															const next = parseValueInput(event.target.value);
+															if (next !== null || event.target.value.trim() === "") {
+																setLocalLotValue(lot.id, next);
+															}
+														}}
+														onBlur={(event) => {
+															const raw = event.target.value;
+															if (!raw.trim()) return;
+															void persistLotValue(lot.id, raw);
+														}}
+														disabled={updatingLotValueId === lot.id}
+														placeholder="0"
+														className="w-full rounded border border-[#005f9a] bg-[#006eb2] py-0.5 pl-4 pr-1 text-center text-xs font-bold text-white disabled:opacity-50 sm:px-2 sm:py-1 sm:pl-5 sm:text-sm placeholder:text-white/70"
+													/>
+												</div>
+											) : null}
 										</div>
 
 										<div className="flex items-center gap-1">
@@ -1512,6 +1667,33 @@ export default function ListDetailPage() {
 					</div>
 				) : null}
 
+				{activeOfferDetailsLot && activeOfferDetailsSummary ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setOfferDetailsLotId(null)}>
+						<div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
+								<h3 className="text-lg font-semibold text-slate-900">Ofertas recibidas</h3>
+								<button
+									type="button"
+									onClick={() => setOfferDetailsLotId(null)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<p className="mt-2 text-sm text-slate-700">{activeOfferDetailsLot.part_name || activeOfferDetailsLot.part_num}</p>
+							<ul className="mt-3 space-y-2">
+								{activeOfferDetailsSummary.byUser.map((userRow) => (
+									<li key={userRow.name} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+										<span className="text-slate-900">{userRow.name}</span>
+										<span className="font-semibold text-slate-700">{userRow.pieces} piezas</span>
+									</li>
+								))}
+							</ul>
+						</div>
+					</div>
+				) : null}
+
 				{showImportExportModal ? (
 					<div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowImportExportModal(false)}>
 						<div
@@ -1566,7 +1748,7 @@ export default function ListDetailPage() {
 									</div>
 								) : (
 									<div className="rounded-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-slate-800">
-										{`Lista de deseos ${list.name}`}
+										{`${isSaleList ? "Lista de ventas" : "Lista de deseos"} ${displayListName}`}
 									</div>
 								)}
 
@@ -1576,7 +1758,7 @@ export default function ListDetailPage() {
 
 								{importExportMode === "import" ? (
 									<div className="rounded-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-slate-800">
-										{`Lista de deseos ${list.name}`}
+										{`${isSaleList ? "Lista de ventas" : "Lista de deseos"} ${displayListName}`}
 									</div>
 								) : (
 									<div className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">

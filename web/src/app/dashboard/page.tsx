@@ -10,6 +10,37 @@ import { getRandomLoadingMessage } from "@/lib/loading-messages";
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
 const USER_FACE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const SALE_LIST_PREFIX = "Venta: ";
+const MASTER_EMAIL = "martindasnoy@gmail.com";
+
+type MasterModuleKey = "poolWanted" | "poolSale" | "minifiguras";
+type MasterModules = Record<MasterModuleKey, boolean>;
+
+type FeatureFlagRow = {
+	module_key: string;
+	enabled: boolean;
+};
+
+const DEFAULT_MASTER_MODULES: MasterModules = {
+	poolWanted: true,
+	poolSale: true,
+	minifiguras: true,
+};
+
+const MODULE_DB_KEYS: Record<MasterModuleKey, string> = {
+	poolWanted: "pool_wanted",
+	poolSale: "pool_sale",
+	minifiguras: "minifiguras",
+};
+
+function isSaleListName(listName: string) {
+	return listName.trim().toLowerCase().startsWith("venta:");
+}
+
+function getDisplayListName(listName: string) {
+	if (!isSaleListName(listName)) return listName;
+	return listName.replace(/^venta:\s*/i, "").trim();
+}
 
 type UserList = {
 	id: string;
@@ -25,9 +56,13 @@ export default function DashboardPage() {
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const [userEmail, setUserEmail] = useState("");
 	const [displayName, setDisplayName] = useState("");
+	const [isMasterUser, setIsMasterUser] = useState(false);
+	const [showMasterModal, setShowMasterModal] = useState(false);
+	const [masterModules, setMasterModules] = useState<MasterModules>(DEFAULT_MASTER_MODULES);
 	const [lists, setLists] = useState<UserList[]>([]);
 	const [newListName, setNewListName] = useState("");
 	const [isPublic, setIsPublic] = useState(false);
+	const [createListKind, setCreateListKind] = useState<"wish" | "sale">("wish");
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [switchingId, setSwitchingId] = useState<string | null>(null);
@@ -47,6 +82,30 @@ export default function DashboardPage() {
 	const [settingsSaving, setSettingsSaving] = useState(false);
 	const [passwordSaving, setPasswordSaving] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
+
+	async function loadMasterModules() {
+		const supabase = getSupabaseClient();
+		const { data, error } = await supabase
+			.from("app_feature_flags")
+			.select("module_key,enabled")
+			.in("module_key", Object.values(MODULE_DB_KEYS));
+
+		if (error) {
+			setMasterModules(DEFAULT_MASTER_MODULES);
+			return;
+		}
+
+		const byKey = new Map<string, FeatureFlagRow>();
+		for (const row of (data as FeatureFlagRow[] | null) ?? []) {
+			if (!row?.module_key) continue;
+			byKey.set(String(row.module_key), row);
+		}
+		setMasterModules({
+			poolWanted: Boolean(byKey.get(MODULE_DB_KEYS.poolWanted)?.enabled ?? true),
+			poolSale: Boolean(byKey.get(MODULE_DB_KEYS.poolSale)?.enabled ?? true),
+			minifiguras: Boolean(byKey.get(MODULE_DB_KEYS.minifiguras)?.enabled ?? true),
+		});
+	}
 
 	async function loadLists(ownerId: string) {
 		const supabase = getSupabaseClient();
@@ -96,13 +155,14 @@ export default function DashboardPage() {
 
 		const autoLists = enriched.filter((list) => list.is_auto_generated);
 		const manualLists = enriched.filter((list) => !list.is_auto_generated);
+		const nonEmptyAutoLists = autoLists.filter((list) => list.lots_count > 0 || list.pieces_count > 0);
 
-		if (autoLists.length === 0) {
+		if (nonEmptyAutoLists.length === 0) {
 			setLists(manualLists);
 			return;
 		}
 
-		const mergedAuto = autoLists.reduce((acc, list) => ({
+		const mergedAuto = nonEmptyAutoLists.reduce((acc, list) => ({
 			...acc,
 			id: acc.id || list.id,
 			name: AUTO_MINIFIG_LIST_NAME,
@@ -138,6 +198,11 @@ export default function DashboardPage() {
 				}
 
 				setUserEmail(user.email ?? "");
+				const normalizedEmail = (user.email ?? "").trim().toLowerCase();
+				const isMaster = normalizedEmail === MASTER_EMAIL;
+				setIsMasterUser(isMaster);
+				await loadMasterModules();
+
 				setDisplayName((user.user_metadata?.display_name as string) ?? "");
 				const storedFace = Number(user.user_metadata?.minifig_face ?? 1);
 				setSelectedFace(Number.isFinite(storedFace) && storedFace >= 1 && storedFace <= 9 ? storedFace : 1);
@@ -151,7 +216,34 @@ export default function DashboardPage() {
 		}
 
 		void loadDashboard();
+		const intervalId = window.setInterval(() => {
+			void loadMasterModules();
+		}, 10000);
+
+		return () => window.clearInterval(intervalId);
 	}, [router]);
+
+	async function toggleMasterModule(moduleKey: MasterModuleKey) {
+		if (!isMasterUser) return;
+
+		const previous = masterModules[moduleKey];
+		const nextValue = !previous;
+		setMasterModules((current) => ({ ...current, [moduleKey]: nextValue }));
+
+		const supabase = getSupabaseClient();
+		const { error } = await supabase.from("app_feature_flags").upsert(
+			{
+				module_key: MODULE_DB_KEYS[moduleKey],
+				enabled: nextValue,
+			},
+			{ onConflict: "module_key" },
+		);
+
+		if (error) {
+			setMasterModules((current) => ({ ...current, [moduleKey]: previous }));
+			setMessage(error.message);
+		}
+	}
 
 	async function createList(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -169,19 +261,22 @@ export default function DashboardPage() {
 				return;
 			}
 
-			const name = newListName.trim();
+			const rawName = newListName.trim();
+			const name = createListKind === "sale" && rawName ? (rawName.startsWith(SALE_LIST_PREFIX) ? rawName : `${SALE_LIST_PREFIX}${rawName}`) : rawName;
 			if (!name) {
 				setMessage("Escribe un nombre para la nueva lista.");
 				setSaving(false);
 				return;
 			}
 
+			const nextIsPublic = createListKind === "sale" ? true : isPublic;
+
 			const { error } = await supabase
 				.from("lists")
 				.insert({
 					owner_id: user.id,
 					name,
-					is_public: isPublic,
+					is_public: nextIsPublic,
 					status: "draft",
 				});
 
@@ -190,6 +285,7 @@ export default function DashboardPage() {
 			} else {
 				setNewListName("");
 				setIsPublic(false);
+				setCreateListKind("wish");
 				await loadLists(user.id);
 				setMessage("Lista creada correctamente.");
 			}
@@ -230,7 +326,7 @@ export default function DashboardPage() {
 
 	function openRenameList(list: UserList) {
 		setEditingListId(list.id);
-		setEditingListNameInput(list.name);
+		setEditingListNameInput(getDisplayListName(list.name));
 	}
 
 	function cancelRenameList() {
@@ -250,14 +346,16 @@ export default function DashboardPage() {
 
 		try {
 			const supabase = getSupabaseClient();
-			const { error } = await supabase.from("lists").update({ name: nextName }).eq("id", listId);
+			const currentList = lists.find((list) => list.id === listId) ?? null;
+			const finalName = currentList && isSaleListName(currentList.name) ? `${SALE_LIST_PREFIX}${nextName}` : nextName;
+			const { error } = await supabase.from("lists").update({ name: finalName }).eq("id", listId);
 
 			if (error) {
 				setMessage(error.message);
 				return;
 			}
 
-			setLists((current) => current.map((list) => (list.id === listId ? { ...list, name: nextName } : list)));
+			setLists((current) => current.map((list) => (list.id === listId ? { ...list, name: finalName } : list)));
 			setEditingListId(null);
 			setEditingListNameInput("");
 		} finally {
@@ -414,6 +512,123 @@ export default function DashboardPage() {
 		}
 	}
 
+	function renderListItem(list: UserList) {
+		const isSaleList = isSaleListName(list.name);
+		const displayListName = getDisplayListName(list.name);
+		const privateTooltipText = isSaleList
+			? "Las piezas de esta lista solo las ves vos."
+			: "Solo vos vas a poder ver estas listas.";
+		const publicTooltipText = isSaleList
+			? "Las piezas de esta lista se muestran a la venta."
+			: "Estas listas entran en el pool de piezas para que otros usuarios puedan dartelas.";
+
+		return (
+			<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+				<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+					<div className="flex items-start gap-3">
+						<div className="h-14 w-14 shrink-0 overflow-hidden">
+							<img
+								src={list.is_auto_generated ? "/Minifigura_silueta_B.png?v=5" : "/pieza_silueta.png?v=5"}
+								alt={list.is_auto_generated ? "Minifiguras" : "Piezas"}
+								className={`h-14 w-14 object-contain ${list.is_auto_generated ? "" : "-translate-x-1"}`}
+							/>
+						</div>
+						<div>
+							{editingListId === list.id ? (
+								<div className="flex flex-wrap items-center gap-2">
+									<input
+										type="text"
+										value={editingListNameInput}
+										onChange={(event) => setEditingListNameInput(event.target.value)}
+										disabled={renamingListId === list.id}
+										className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
+									/>
+									<button
+										type="button"
+										onClick={() => void saveRenameList(list.id)}
+										disabled={renamingListId === list.id}
+										className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+									>
+										Guardar
+									</button>
+									<button
+										type="button"
+										onClick={cancelRenameList}
+										disabled={renamingListId === list.id}
+										className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										Cancelar
+									</button>
+								</div>
+							) : (
+								<div className="flex items-center gap-1.5">
+									<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
+										{displayListName}
+									</Link>
+									<button
+										type="button"
+										onClick={() => openRenameList(list)}
+										disabled={renamingListId === list.id || list.is_auto_generated}
+										className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+										title="Editar nombre"
+									>
+										✎
+									</button>
+								</div>
+							)}
+							<p className="mt-1 text-xs text-slate-500">
+								<span className="sm:hidden">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
+								<span className="hidden sm:inline">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
+							</p>
+						</div>
+					</div>
+					<div className="w-full md:w-auto">
+						<div className="flex flex-wrap items-center justify-between gap-2 md:flex-col md:items-end md:justify-start">
+							<div className="flex items-center gap-2">
+								<div className="group relative">
+									<button
+										type="button"
+										onClick={() => switchVisibility(list.id, false)}
+										disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
+										className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+									>
+										Privado
+									</button>
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-48 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										{privateTooltipText}
+									</div>
+								</div>
+								<div className="group relative">
+									<button
+										type="button"
+										onClick={() => switchVisibility(list.id, true)}
+										disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
+										className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+									>
+										Publico
+									</button>
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										{publicTooltipText}
+									</div>
+								</div>
+							</div>
+							{list.is_auto_generated ? null : (
+								<button
+									type="button"
+									onClick={() => setDeleteTarget(list)}
+									disabled={switchingId === list.id || deletingListId === list.id}
+									className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+								>
+									Chau lista
+								</button>
+							)}
+						</div>
+					</div>
+				</div>
+			</li>
+		);
+	}
+
 	if (loading) {
 		return (
 			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
@@ -421,6 +636,16 @@ export default function DashboardPage() {
 			</div>
 		);
 	}
+
+	const showPoolWantedModule = isMasterUser || masterModules.poolWanted;
+	const showPoolSaleModule = isMasterUser || masterModules.poolSale;
+	const showMinifigurasModule = isMasterUser || masterModules.minifiguras;
+	const wishLists = lists.filter((list) => {
+		if (isSaleListName(list.name)) return false;
+		if (!showMinifigurasModule && list.is_auto_generated) return false;
+		return true;
+	});
+	const saleLists = lists.filter((list) => isSaleListName(list.name));
 
 	return (
 		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
@@ -430,17 +655,33 @@ export default function DashboardPage() {
 						<div className="flex items-center justify-between gap-3">
 							<div className="flex min-w-0 items-center gap-2">
 								<h1 className="break-all text-3xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
-								<button
-									type="button"
-									onClick={openUserSettings}
-									className="rounded-md border border-slate-300 p-1.5 text-slate-700 hover:bg-slate-50"
-									aria-label="Configuracion de usuario"
-								>
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
-										<path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
-										<path d="m19.4 13.5.1-3-1.9-.5a6 6 0 0 0-.6-1.4l1-1.7-2.1-2.1-1.7 1a6 6 0 0 0-1.4-.6L12.5 3h-3l-.5 1.9a6 6 0 0 0-1.4.6l-1.7-1-2.1 2.1 1 1.7a6 6 0 0 0-.6 1.4L3 10.5v3l1.9.5a6 6 0 0 0 .6 1.4l-1 1.7 2.1 2.1 1.7-1a6 6 0 0 0 1.4.6l.5 1.9h3l.5-1.9a6 6 0 0 0 1.4-.6l1.7 1 2.1-2.1-1-1.7a6 6 0 0 0 .6-1.4l1.9-.5Z" />
-									</svg>
-								</button>
+								{isMasterUser ? (
+									<button
+										type="button"
+										onClick={() => setShowMasterModal(true)}
+										className="rounded-md bg-black px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800"
+									>
+										MASTER
+									</button>
+								) : null}
+								<div className="group relative">
+									<button
+										type="button"
+										onClick={openUserSettings}
+										className="rounded-md border border-slate-300 p-1.5 text-slate-700 hover:bg-slate-50"
+										aria-label="Configuracion de usuario"
+									>
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+											<path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
+											<path d="m19.4 13.5.1-3-1.9-.5a6 6 0 0 0-.6-1.4l1-1.7-2.1-2.1-1.7 1a6 6 0 0 0-1.4-.6L12.5 3h-3l-.5 1.9a6 6 0 0 0-1.4.6l-1.7-1-2.1 2.1 1 1.7a6 6 0 0 0-.6 1.4L3 10.5v3l1.9.5a6 6 0 0 0 .6 1.4l-1 1.7 2.1 2.1 1.7-1a6 6 0 0 0 1.4.6l.5 1.9h3l.5-1.9a6 6 0 0 0 1.4-.6l1.7 1 2.1-2.1-1-1.7a6 6 0 0 0 .6-1.4l1.9-.5Z" />
+										</svg>
+									</button>
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 scale-95 opacity-0 transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										<div className="relative whitespace-nowrap rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-normal text-slate-900 shadow-lg">
+											Configuración del Usuario
+										</div>
+									</div>
+								</div>
 							</div>
 							<img src={`/Cara_minifig_${selectedFace}.svg`} alt="Avatar minifig" className="h-20 w-20 shrink-0 object-contain" />
 						</div>
@@ -448,7 +689,33 @@ export default function DashboardPage() {
 				</header>
 
 				<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-3 sm:p-4">
-					<h2 className="text-xl font-semibold text-slate-900">Crear nueva lista de deseos</h2>
+					<div className="flex flex-wrap items-center gap-2">
+						<h2 className="text-xl font-semibold text-slate-900">Crear una:</h2>
+						<div className="group relative">
+							<button
+								type="button"
+								onClick={() => setCreateListKind("wish")}
+								className={`rounded-md px-3 py-1 text-xs font-semibold ${createListKind === "wish" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+							>
+								Lista de deseos
+							</button>
+							<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+								Armá una lista de deseos y juntá en un solo lugar todas las piezas que te faltan.
+							</div>
+						</div>
+						<div className="group relative">
+							<button
+								type="button"
+								onClick={() => setCreateListKind("sale")}
+								className={`rounded-md px-3 py-1 text-xs font-semibold ${createListKind === "sale" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+							>
+								Lista de venta
+							</button>
+							<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+								Creá listas para vender tus piezas y ponelas a circular en el pool con otros usuarios.
+							</div>
+						</div>
+					</div>
 					<form onSubmit={createList} className="mt-3 space-y-3">
 						<div>
 							<input
@@ -462,15 +729,19 @@ export default function DashboardPage() {
 						</div>
 
 						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:pr-2">
-							<label className="flex items-center gap-2 text-sm text-slate-700">
-								<input
-									type="checkbox"
-									checked={isPublic}
-									onChange={(event) => setIsPublic(event.target.checked)}
-									className="h-4 w-4"
-								/>
-								Lista publica (visible en el pool)
-							</label>
+							{createListKind === "sale" ? (
+								<p className="text-sm text-slate-700">La lista de venta se crea publica automaticamente.</p>
+							) : (
+								<label className="flex items-center gap-2 text-sm text-slate-700">
+									<input
+										type="checkbox"
+										checked={isPublic}
+										onChange={(event) => setIsPublic(event.target.checked)}
+										className="h-4 w-4"
+									/>
+									Lista publica (visible en el pool)
+								</label>
+							)}
 
 							<button
 								type="submit"
@@ -485,108 +756,14 @@ export default function DashboardPage() {
 
 				<section className="grid gap-4 md:grid-cols-3">
 					<div className="rounded-xl border border-slate-200 p-4 sm:p-5 md:col-span-2">
-						<h2 className="text-xl font-semibold text-slate-900">Tus listas creadas</h2>
+						<h2 className="text-xl font-semibold text-slate-900">Tus listas de deseos creadas</h2>
 						<ul className="mt-4 space-y-3">
-							{lists.length === 0 ? (
+							{wishLists.length === 0 ? (
 								<li className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-									Todavia no creaste listas.
+									Todavia no creaste listas de deseos.
 								</li>
 							) : (
-								lists.map((list) => (
-									<li key={list.id} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-										<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-											<div className="flex items-start gap-3">
-												<div className="h-14 w-14 shrink-0 overflow-hidden">
-													<img
-														src={list.is_auto_generated ? "/Minifigura_silueta_B.png?v=5" : "/pieza_silueta.png?v=5"}
-														alt={list.is_auto_generated ? "Minifiguras" : "Piezas"}
-														className={`h-14 w-14 object-contain ${list.is_auto_generated ? "" : "-translate-x-1"}`}
-													/>
-												</div>
-												<div>
-												{editingListId === list.id ? (
-													<div className="flex flex-wrap items-center gap-2">
-														<input
-															type="text"
-															value={editingListNameInput}
-															onChange={(event) => setEditingListNameInput(event.target.value)}
-															disabled={renamingListId === list.id}
-															className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
-														/>
-														<button
-															type="button"
-															onClick={() => void saveRenameList(list.id)}
-															disabled={renamingListId === list.id}
-															className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-														>
-															Guardar
-														</button>
-														<button
-															type="button"
-															onClick={cancelRenameList}
-															disabled={renamingListId === list.id}
-															className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-														>
-															Cancelar
-														</button>
-													</div>
-												) : (
-													<div className="flex items-center gap-1.5">
-														<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
-															{list.name}
-														</Link>
-													<button
-														type="button"
-														onClick={() => openRenameList(list)}
-														disabled={renamingListId === list.id || list.is_auto_generated}
-														className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-														title="Editar nombre"
-													>
-															✎
-														</button>
-													</div>
-												)}
-												<p className="mt-1 text-xs text-slate-500">
-													<span className="sm:hidden">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
-													<span className="hidden sm:inline">Lotes: {list.lots_count} - Piezas: {list.pieces_count}</span>
-												</p>
-												</div>
-											</div>
-										<div className="w-full md:w-auto">
-											<div className="flex flex-wrap items-center justify-between gap-2 md:flex-col md:items-end md:justify-start">
-												<div className="flex items-center gap-2">
-												<button
-													type="button"
-													onClick={() => switchVisibility(list.id, false)}
-													disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
-													className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-												>
-													Privado
-												</button>
-												<button
-													type="button"
-													onClick={() => switchVisibility(list.id, true)}
-													disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
-													className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-												>
-													Publico
-												</button>
-											</div>
-											{list.is_auto_generated ? null : (
-												<button
-													type="button"
-													onClick={() => setDeleteTarget(list)}
-													disabled={switchingId === list.id || deletingListId === list.id}
-													className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-												>
-													Eliminar lista
-												</button>
-											)}
-										</div>
-										</div>
-										</div>
-									</li>
-								))
+								wishLists.map((list) => renderListItem(list))
 							)}
 
 							<li className="rounded-lg border border-[#007bb8] bg-[#0093DD] px-4 py-3 text-white">
@@ -601,6 +778,17 @@ export default function DashboardPage() {
 								</div>
 							</li>
 						</ul>
+
+						<h2 className="mt-6 text-xl font-semibold text-slate-900">Tus listas de ventas creadas</h2>
+						<ul className="mt-4 space-y-3">
+							{saleLists.length === 0 ? (
+								<li className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+									Todavia no creaste listas de venta.
+								</li>
+							) : (
+								saleLists.map((list) => renderListItem(list))
+							)}
+						</ul>
 					</div>
 
 					<div className="flex flex-col gap-4">
@@ -609,13 +797,42 @@ export default function DashboardPage() {
 								<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
 							</div>
 							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
-							<div className="mt-4 flex justify-center">
-								<Link
-									href="/pool"
-									className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
-								>
-									Pool de items deseados
-								</Link>
+							<div className="mt-4 flex flex-col items-center gap-2">
+								{showPoolWantedModule ? (
+									<div className="group relative">
+										<Link
+											href="/pool"
+											className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+										>
+											Pool de items deseados
+										</Link>
+										<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+											En este sector vas a poder ver los items que desean otros miembros; si ves que tenes algo pone "Yo tengo" y arregla como le das esas piezas.
+										</div>
+									</div>
+								) : null}
+								{showPoolSaleModule ? (
+									<div className="group relative">
+										<Link
+											href="/pool-venta"
+											className="inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+										>
+											Pool de items a la venta
+										</Link>
+										<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+											Aca vas a poder poner piezas a la venta para otros miembros.
+										</div>
+									</div>
+								) : (
+									<button
+										type="button"
+										disabled
+										className="inline-flex h-10 cursor-not-allowed items-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
+									>
+										Pool de ventas proximamente
+									</button>
+								)}
+								{!showPoolWantedModule && !showPoolSaleModule ? <p className="text-xs text-slate-500">Modulos de pool desactivados.</p> : null}
 							</div>
 						</div>
 
@@ -624,18 +841,77 @@ export default function DashboardPage() {
 								<img src="/Minifigura_silueta.png?v=3" alt="Minifiguras" className="h-28 w-28 object-contain" />
 							</div>
 							<div className="mt-4 flex justify-center">
-								<Link
-									href="/dashboard/minifiguras"
-									className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
-								>
-									Minifiguras CMF
-								</Link>
+								<div className="group relative">
+									{showMinifigurasModule ? (
+										<Link
+											href="/dashboard/minifiguras"
+											className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+										>
+											Minifiguras CMF
+										</Link>
+									) : (
+										<button
+											type="button"
+											disabled
+											className="inline-flex h-10 cursor-not-allowed items-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
+										>
+											Proximamente
+										</button>
+									)}
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										Lleva la cuenta de tus colecciones de minifiguras de coleccion de todas las series.
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>
 				</section>
 
 				{message ? <p className="text-sm text-slate-700">{message}</p> : null}
+
+				{showMasterModal ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowMasterModal(false)}>
+						<div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between">
+								<h3 className="text-xl font-semibold text-slate-900">Panel MASTER</h3>
+								<button
+									type="button"
+									onClick={() => setShowMasterModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+							<p className="mt-2 text-xs text-slate-600">Activa o desactiva modulos del dashboard.</p>
+							<div className="mt-4 space-y-2">
+								<button
+									type="button"
+									onClick={() => toggleMasterModule("poolWanted")}
+									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolWanted ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+								>
+									<span>Pool de items deseados</span>
+									<span>{masterModules.poolWanted ? "Activo" : "Inactivo"}</span>
+								</button>
+								<button
+									type="button"
+									onClick={() => toggleMasterModule("poolSale")}
+									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolSale ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+								>
+									<span>Pool de items a la venta</span>
+									<span>{masterModules.poolSale ? "Activo" : "Inactivo"}</span>
+								</button>
+								<button
+									type="button"
+									onClick={() => toggleMasterModule("minifiguras")}
+									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.minifiguras ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+								>
+									<span>Minifiguras CMF</span>
+									<span>{masterModules.minifiguras ? "Activo" : "Inactivo"}</span>
+								</button>
+							</div>
+						</div>
+					</div>
+				) : null}
 
 				{deleteTarget ? (
 					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
@@ -644,7 +920,7 @@ export default function DashboardPage() {
 								<Image src="/LEGO-ICON_A.svg" alt="Lego icon" width={128} height={128} />
 								<div className="mt-3">
 									<p className="text-base font-medium text-slate-700">Esta lista va a ser desarmada</p>
-									<h3 className="mt-1 text-2xl text-slate-900">{deleteTarget.name}</h3>
+									<h3 className="mt-1 text-2xl text-slate-900">{getDisplayListName(deleteTarget.name)}</h3>
 								</div>
 								<div className="mt-5 flex items-center gap-2">
 									<button
@@ -804,6 +1080,7 @@ export default function DashboardPage() {
 					>
 						Cerrar sesion
 					</button>
+					<p className="mt-2 text-center text-xs text-slate-500">Version by Martin Dasnoy - Faltantes_1.3</p>
 				</div>
 			</main>
 		</div>

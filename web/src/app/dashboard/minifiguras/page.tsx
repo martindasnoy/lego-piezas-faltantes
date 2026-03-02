@@ -252,7 +252,6 @@ export default function MinifigurasPage() {
 
 				const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
 				userMetadataRef.current = metadata;
-				void ensureAutoMissingList(user.id).catch(() => undefined);
 
 				const saved = metadata[MINIFIGURAS_THEME_IDS_KEY];
 				const parsed = Array.isArray(saved)
@@ -312,6 +311,7 @@ export default function MinifigurasPage() {
 					}
 					missingPartsRef.current = nextMissing;
 					setMissingPartsByFigureKey(nextMissing);
+					void syncMissingPartsList(user.id, nextMissing).catch(() => undefined);
 				}
 			} catch {
 				if (mounted) {
@@ -610,15 +610,35 @@ export default function MinifigurasPage() {
 
 	async function syncMissingPartsList(ownerId: string, missingMap: Record<string, MissingPartEntry[]>) {
 		const supabase = getSupabaseClient();
-		const listId = await ensureAutoMissingList(ownerId);
 		const items = buildAggregatedMissingItems(missingMap);
+
+		if (items.length === 0) {
+			const { data: existingRows } = await supabase
+				.from("lists")
+				.select("id")
+				.eq("owner_id", ownerId)
+				.in("name", [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES]);
+
+			const existingIds = (existingRows ?? []).map((row) => String(row.id));
+			if (existingIds.length > 0) {
+				await supabase.from("list_items").delete().in("list_id", existingIds);
+			}
+
+			await supabase
+				.from("lists")
+				.delete()
+				.eq("owner_id", ownerId)
+				.in("name", [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES]);
+
+			return;
+		}
+
+		const listId = await ensureAutoMissingList(ownerId);
 
 		const { error: deleteError } = await supabase.from("list_items").delete().eq("list_id", listId);
 		if (deleteError) {
 			throw new Error(deleteError.message);
 		}
-
-		if (items.length === 0) return;
 
 		const { error: insertError } = await supabase.from("list_items").insert(
 			items.map((item) => ({
@@ -660,15 +680,22 @@ export default function MinifigurasPage() {
 			};
 			userMetadataRef.current = nextMetadata;
 
-			const { data, error } = await supabase.auth.updateUser({ data: nextMetadata });
-			if (error) {
+			const updateResult = await supabase.auth.updateUser({ data: nextMetadata });
+			const metadataError = updateResult.error;
+
+			let syncError: Error | null = null;
+			try {
+				await syncMissingPartsList(user.id, nextMissingMap);
+			} catch (error) {
+				syncError = error instanceof Error ? error : new Error("sync-missing-list-failed");
+			}
+
+			if (metadataError || syncError) {
 				setPartsSaveStatus("No se pudo guardar piezas.");
 				return;
 			}
 
-			await syncMissingPartsList(user.id, nextMissingMap);
-
-			userMetadataRef.current = (data.user?.user_metadata ?? nextMetadata) as Record<string, unknown>;
+			userMetadataRef.current = (updateResult.data.user?.user_metadata ?? nextMetadata) as Record<string, unknown>;
 			setPartsSaveStatus("Piezas guardadas.");
 		} catch {
 			setPartsSaveStatus("No se pudo guardar piezas.");

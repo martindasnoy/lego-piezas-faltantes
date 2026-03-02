@@ -9,7 +9,7 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
 3. `offers_list_item_id_fix.sql`
    - Normaliza `offers.list_item_id` al tipo real de `list_items.id`.
 4. `pool_public_rpc.sql`
-   - Crea RPC para mostrar lotes publicos mezclados con `owner_name` y quien marco `Yo tengo`.
+   - Crea RPC para mostrar lotes publicos mezclados con `owner_name`, `value` y quien marco `Yo tengo`.
 5. `offers_owner_rpc.sql`
    - Crea RPC para que el dueno vea ofertas por lote en su lista.
 6. `offers_create_rpc.sql`
@@ -18,6 +18,10 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
    - Permite toggle de `Yo tengo` (poner y deshacer si fue tu clic y sigue pending).
 8. `offers_mine_rpc.sql`
    - Crea RPC para la lista automatica `Piezas ofertadas` (resumen de tus `Yo tengo`).
+9. `list_items_value.sql`
+   - Agrega campo `value` en `list_items` para guardar valor por item en listas de venta.
+10. `app_feature_flags.sql`
+   - Crea flags globales de modulos y permisos para que solo `martindasnoy@gmail.com` pueda editarlos desde MASTER.
 
 ## Verificacion rapida
 
