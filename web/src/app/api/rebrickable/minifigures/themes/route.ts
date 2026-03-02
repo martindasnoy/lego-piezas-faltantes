@@ -250,12 +250,20 @@ export async function GET() {
 
 		const resultsWithCount = await Promise.all(
 			rawResults.map(async (theme) => {
-				const stats = await fetchThemeStats(theme.id, apiKey);
-				return {
-					...theme,
-					year: theme.year ?? stats.year,
-					itemCount: stats.itemCount,
-				};
+				try {
+					const stats = await fetchThemeStats(theme.id, apiKey);
+					return {
+						...theme,
+						year: theme.year ?? stats.year,
+						itemCount: stats.itemCount,
+					};
+				} catch {
+					return {
+						...theme,
+						year: theme.year ?? null,
+						itemCount: 0,
+					};
+				}
 			}),
 		);
 
