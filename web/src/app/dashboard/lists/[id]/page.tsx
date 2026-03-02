@@ -8,6 +8,9 @@ import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-category-flags";
 
+const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
+const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
+
 type ListInfo = {
 	id: string;
 	name: string;
@@ -84,6 +87,12 @@ export default function ListDetailPage() {
 	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
 	const [message, setMessage] = useState<string | null>(null);
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
+	const [showImportExportModal, setShowImportExportModal] = useState(false);
+	const [importExportMode, setImportExportMode] = useState<"import" | "export">("import");
+	const [importSource, setImportSource] = useState("");
+	const [exportTarget, setExportTarget] = useState("");
+	const [importRawInput, setImportRawInput] = useState("");
+	const [importExportBusy, setImportExportBusy] = useState(false);
 	const [catalogLoading, setCatalogLoading] = useState(false);
 	const [catalogError, setCatalogError] = useState<string | null>(null);
 	const [catalogCategories, setCatalogCategories] = useState<CatalogCategory[]>([]);
@@ -101,6 +110,15 @@ export default function ListDetailPage() {
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+	const importExportSites = [
+		"Lego PAB (pick a brick)",
+		"Bricklink",
+		"Rebricable",
+		"Brickset",
+		"X1",
+		"X2",
+		"X3",
+	] as const;
 
 	const totals = useMemo(() => {
 		return lots.reduce(
@@ -155,6 +173,13 @@ export default function ListDetailPage() {
 		});
 	}, [availableColors, colorPickerSearch]);
 
+	function normalizePartCodeInput(raw: string) {
+		const trimmed = raw.trim();
+		if (!trimmed) return "";
+		const firstToken = trimmed.split(" - ")[0]?.trim() ?? "";
+		return firstToken.replace(/^#+\s*/, "").trim().toUpperCase();
+	}
+
 	const filteredCatalogCategories = useMemo(() => {
 		const byName = (a: CatalogCategory, b: CatalogCategory) =>
 			a.name.localeCompare(b.name, "en", { sensitivity: "base" });
@@ -193,7 +218,7 @@ export default function ListDetailPage() {
 			return;
 		}
 
-		const query = partInput.trim();
+		const query = partInput.trim().replace(/^#+\s*/, "");
 		if (query.length < 2) {
 			setSuggestions([]);
 			setLoadingSuggestions(false);
@@ -521,9 +546,9 @@ export default function ListDetailPage() {
 
 		try {
 			const supabase = getSupabaseClient();
-			const piece = partInput.trim();
+			const piece = normalizePartCodeInput(partInput);
 			const partNum = selectedPart?.part_num || piece;
-			const partName = selectedPart?.name || piece;
+			const partName = selectedPart?.name || partNum;
 			const selectedColorName = selectedColor
 				? useBricklinkNomenclature
 					? selectedColor.blName?.trim() || selectedColor.name
@@ -535,7 +560,7 @@ export default function ListDetailPage() {
 				: colorInput.trim();
 			const quantity = Number(quantityInput);
 
-			if (!piece) {
+			if (!partNum) {
 				setMessage("Escribe la pieza para crear el lote.");
 				setSaving(false);
 				return;
@@ -762,6 +787,275 @@ export default function ListDetailPage() {
 		void persistLotColor(lotId, nextColorName);
 	}
 
+	function getBricklinkColorName(colorIdRaw: string) {
+		const colorId = Number(colorIdRaw);
+		const known: Record<number, string> = {
+			0: "Sin color",
+			1: "White",
+			3: "Yellow",
+			4: "Orange",
+			5: "Red",
+			6: "Green",
+			7: "Blue",
+			9: "Light Gray",
+			10: "Dark Gray",
+			11: "Black",
+			13: "Trans Clear",
+			14: "Trans Black",
+			85: "Dark Bluish Gray",
+			86: "Light Bluish Gray",
+			110: "Bright Light Orange",
+		};
+		return known[colorId] ?? `BL ${colorIdRaw}`;
+	}
+
+	function parseBricklinkInventoryXml(raw: string) {
+		const itemBlocks = [...raw.matchAll(/<ITEM>([\s\S]*?)<\/ITEM>/gi)];
+		const rows: Array<{ part_num: string; part_name: string; color_name: string | null; quantity: number }> = [];
+
+		for (const match of itemBlocks) {
+			const block = match[1] ?? "";
+			const readTag = (tag: string) => {
+				const found = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+				return (found?.[1] ?? "").trim();
+			};
+
+			const itemType = readTag("ITEMTYPE");
+			if (itemType && itemType.toUpperCase() !== "P") continue;
+
+			const partNum = readTag("ITEMID").toUpperCase();
+			if (!partNum) continue;
+
+			const colorId = readTag("COLOR");
+			const minQty = Number(readTag("MINQTY") || "1");
+			const quantity = Number.isFinite(minQty) && minQty > 0 ? Math.floor(minQty) : 1;
+
+			rows.push({
+				part_num: partNum,
+				part_name: partNum,
+				color_name: colorId ? getBricklinkColorName(colorId) : null,
+				quantity,
+			});
+		}
+
+		return rows;
+	}
+
+	async function getPartNameMap(partNums: string[]) {
+		const map: Record<string, string> = {};
+		const unique = [...new Set(partNums.map((num) => num.trim().toUpperCase()).filter(Boolean))];
+		const chunkSize = 100;
+
+		for (let i = 0; i < unique.length; i += chunkSize) {
+			const chunk = unique.slice(i, i + chunkSize);
+			const response = await fetch(`/api/rebrickable/parts-by-num?nums=${encodeURIComponent(chunk.join(","))}`);
+			if (!response.ok) continue;
+
+			const payload = (await response.json()) as {
+				results?: Array<{ part_num: string; name?: string | null }>;
+			};
+
+			for (const row of payload.results ?? []) {
+				const key = row.part_num?.trim().toUpperCase();
+				if (!key) continue;
+				if (row.name?.trim()) {
+					map[key] = row.name.trim();
+				}
+			}
+		}
+
+		return map;
+	}
+
+	function normalizeColorKey(raw: string | null | undefined) {
+		return (raw ?? "")
+			.replace(/\(chino\)/gi, "")
+			.toLowerCase()
+			.replace(/grey/g, "gray")
+			.replace(/\s+/g, " ")
+			.trim();
+	}
+
+	function getBricklinkColorId(colorName: string | null | undefined) {
+		const normalized = normalizeColorKey(colorName);
+		const explicitId = normalized.match(/^bl\s*(\d+)$/i);
+		if (explicitId) return Number(explicitId[1]);
+
+		const map: Record<string, number> = {
+			"sin color": 0,
+			white: 1,
+			tan: 2,
+			yellow: 3,
+			orange: 4,
+			red: 5,
+			green: 6,
+			blue: 7,
+			"light gray": 9,
+			"dark gray": 10,
+			black: 11,
+			"trans clear": 13,
+			"trans black": 14,
+			"light bluish gray": 86,
+			"dark bluish gray": 85,
+			"bright light orange": 110,
+		};
+
+		if (normalized in map) return map[normalized];
+		return 0;
+	}
+
+	function escapeXml(raw: string) {
+		return raw
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/\"/g, "&quot;")
+			.replace(/'/g, "&apos;");
+	}
+
+	function downloadTextFile(fileName: string, content: string, mimeType: string) {
+		const blob = new Blob([content], { type: mimeType });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = fileName;
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		URL.revokeObjectURL(url);
+	}
+
+	function buildBricklinkExportBsx() {
+		const lines = [
+			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+			"<BrickStoreXML>",
+			"  <Inventory>",
+		];
+		for (const lot of lots) {
+			lines.push("    <Item>");
+			lines.push("      <ItemTypeID>P</ItemTypeID>");
+			lines.push(`      <ItemID>${escapeXml(lot.part_num)}</ItemID>`);
+			lines.push(`      <ColorID>${getBricklinkColorId(lot.color_name)}</ColorID>`);
+			lines.push(`      <Qty>${Math.max(1, Number(lot.quantity || 1))}</Qty>`);
+			lines.push("      <Condition>N</Condition>");
+			lines.push("      <Status>I</Status>");
+			lines.push("      <Price>-1.0000</Price>");
+			lines.push("      <Remarks></Remarks>");
+			lines.push("    </Item>");
+		}
+		lines.push("  </Inventory>");
+		lines.push("</BrickStoreXML>");
+		return lines.join("\n");
+	}
+
+	function buildGenericExportCsv() {
+		const header = "part_num,part_name,color_name,quantity";
+		const rows = lots.map((lot) => {
+			const values = [lot.part_num, lot.part_name || "", lot.color_name || "", String(lot.quantity || 1)].map((value) => `"${String(value).replace(/\"/g, '""')}"`);
+			return values.join(",");
+		});
+		return [header, ...rows].join("\n");
+	}
+
+	async function handleImportExportAction() {
+		if (importExportMode === "export") {
+			if (!exportTarget) {
+				setMessage("Selecciona destino para exportar.");
+				return;
+			}
+
+			if (lots.length === 0) {
+				setMessage("No hay items para exportar en esta lista.");
+				return;
+			}
+
+			const safeName = (list?.name ?? "lista").trim().replace(/[^a-zA-Z0-9-_]+/g, "_") || "lista";
+			if (exportTarget === "Bricklink") {
+				const xml = buildBricklinkExportBsx();
+				downloadTextFile(`${safeName}_bricklink.bsx`, xml, "application/xml;charset=utf-8");
+				setMessage("Archivo Bricklink (.bsx) exportado.");
+			} else {
+				const csv = buildGenericExportCsv();
+				downloadTextFile(`${safeName}_${exportTarget.toLowerCase().replace(/\s+/g, "_")}.csv`, csv, "text/csv;charset=utf-8");
+				setMessage(`Archivo exportado para ${exportTarget}.`);
+			}
+			return;
+		}
+
+		if (!importSource) {
+			setMessage("Selecciona una opcion para importar.");
+			return;
+		}
+
+		if (importSource !== "Bricklink") {
+			setMessage(`Importador para ${importSource} disponible pronto. Empezamos por Bricklink.`);
+			return;
+		}
+
+		const raw = importRawInput.trim();
+		if (!raw) {
+			setMessage("Pega el XML de Bricklink para importar.");
+			return;
+		}
+
+		const parsedRows = parseBricklinkInventoryXml(raw);
+		if (parsedRows.length === 0) {
+			setMessage("No se encontraron items validos en el XML de Bricklink.");
+			return;
+		}
+
+		setImportExportBusy(true);
+		setMessage(null);
+
+		try {
+			const partNameMap = await getPartNameMap(parsedRows.map((row) => row.part_num));
+			const enrichedRows = parsedRows.map((row) => ({
+				...row,
+				part_num: row.part_num.toUpperCase(),
+				part_name: partNameMap[row.part_num.toUpperCase()] || row.part_num.toUpperCase(),
+			}));
+
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase
+				.from("list_items")
+				.insert(
+					enrichedRows.map((row) => ({
+						list_id: listId,
+						part_num: row.part_num,
+						part_name: row.part_name,
+						color_name: row.color_name,
+						quantity: row.quantity,
+					})),
+				)
+				.select("id,part_name,part_num,color_name,quantity");
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			const importedLots = (data as Lot[]) ?? [];
+			if (importedLots.length > 0) {
+				setLots((current) => [...importedLots, ...current]);
+				void loadPartImages(
+					importedLots.map((lot) => ({
+						part_num: lot.part_num,
+						color_name: lot.color_name,
+					})),
+				);
+				void loadOffersForLots([...(lots.map((lot) => String(lot.id))), ...importedLots.map((lot) => String(lot.id))]);
+			}
+
+			setImportRawInput("");
+			setShowImportExportModal(false);
+			setMessage(`Se importaron ${importedLots.length} items desde Bricklink.`);
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "No se pudo importar la lista.");
+		} finally {
+			setImportExportBusy(false);
+		}
+	}
+
 	function setLocalLotQuantity(lotId: string, nextQuantity: number) {
 		setLots((current) =>
 			current.map((lot) => (lot.id === lotId ? { ...lot, quantity: Number.isFinite(nextQuantity) ? nextQuantity : lot.quantity } : lot)),
@@ -870,6 +1164,8 @@ export default function ListDetailPage() {
 		);
 	}
 
+	const isAutoMinifigList = [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES].includes(list.name.trim());
+
 	return (
 		<div className="min-h-screen bg-[#5bb9e8] px-4 py-6 sm:bg-[#006eb2] sm:px-6 sm:py-8">
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
@@ -878,7 +1174,18 @@ export default function ListDetailPage() {
 						<Link href="/dashboard" className="order-1 self-end text-sm text-slate-600 hover:underline sm:order-2 sm:self-auto">
 							← Volver
 						</Link>
-						<h1 className="order-2 text-2xl font-semibold text-slate-900 sm:order-1 sm:text-3xl">Lista de deseo {list.name.toLocaleUpperCase("es-AR")}</h1>
+						<div className="order-2 sm:order-1">
+							<h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Lista de deseo {list.name.toLocaleUpperCase("es-AR")}</h1>
+							<div className="mt-2 hidden justify-start">
+								<button
+									type="button"
+									onClick={() => setShowImportExportModal(true)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+								>
+									Import/Export
+								</button>
+							</div>
+						</div>
 					</div>
 					<p className="mt-1 text-sm text-slate-600">
 						<span className="sm:hidden">
@@ -890,6 +1197,7 @@ export default function ListDetailPage() {
 					</p>
 				</header>
 
+				{!isAutoMinifigList ? (
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 						<h2 className="text-2xl font-semibold text-slate-900">Agregar item</h2>
@@ -1039,6 +1347,7 @@ export default function ListDetailPage() {
 						</div>
 					</form>
 				</section>
+				) : null}
 
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
 					{lots.length === 0 ? (
@@ -1199,6 +1508,115 @@ export default function ListDetailPage() {
 									);
 								})}
 							</ul>
+						</div>
+					</div>
+				) : null}
+
+				{showImportExportModal ? (
+					<div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowImportExportModal(false)}>
+						<div
+							className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl"
+							onClick={(event) => event.stopPropagation()}
+						>
+							<div className="flex items-center justify-between gap-2">
+								<div className="flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => setImportExportMode("import")}
+										className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${importExportMode === "import" ? "border-[#006eb2] bg-[#006eb2] text-white" : "border-slate-300 bg-white text-slate-700"}`}
+									>
+										Importar
+									</button>
+									<button
+										type="button"
+										onClick={() => setImportExportMode("export")}
+										className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${importExportMode === "export" ? "border-[#006eb2] bg-[#006eb2] text-white" : "border-slate-300 bg-white text-slate-700"}`}
+									>
+										Exportar
+									</button>
+								</div>
+								<button
+									type="button"
+									onClick={() => setShowImportExportModal(false)}
+									className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<div className="mt-3 space-y-3">
+								{importExportMode === "import" ? (
+									<div className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+										<div className="flex items-center justify-between gap-2">
+											<select
+												value={importSource}
+												onChange={(event) => setImportSource(event.target.value)}
+												className="w-full bg-transparent text-sm text-slate-700 outline-none"
+											>
+												<option value="" disabled>
+													Seleccionar una opcion
+												</option>
+												{importExportSites.map((site) => (
+													<option key={site} value={site}>
+														{site}
+													</option>
+												))}
+											</select>
+										</div>
+									</div>
+								) : (
+									<div className="rounded-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-slate-800">
+										{`Lista de deseos ${list.name}`}
+									</div>
+								)}
+
+								<div className="flex justify-center text-slate-600">
+									<img src="/Flecha.svg" alt="Flecha" className="h-11 w-11 object-contain" />
+								</div>
+
+								{importExportMode === "import" ? (
+									<div className="rounded-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-slate-800">
+										{`Lista de deseos ${list.name}`}
+									</div>
+								) : (
+									<div className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+										<div className="flex items-center justify-between gap-2">
+											<select
+												value={exportTarget}
+												onChange={(event) => setExportTarget(event.target.value)}
+												className="w-full bg-transparent text-sm text-slate-700 outline-none"
+											>
+												<option value="" disabled>
+													Seleccionar una opcion
+												</option>
+												{importExportSites.map((site) => (
+													<option key={site} value={site}>
+														{site}
+													</option>
+												))}
+											</select>
+										</div>
+									</div>
+								)}
+
+								{importExportMode === "import" && importSource === "Bricklink" ? (
+									<textarea
+										value={importRawInput}
+										onChange={(event) => setImportRawInput(event.target.value)}
+										placeholder="Pega aqui el XML de Bricklink..."
+										className="min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700 outline-none focus:border-slate-500"
+									/>
+								) : null}
+							</div>
+
+							<button
+								type="button"
+								onClick={() => void handleImportExportAction()}
+								disabled={importExportBusy}
+								className="mt-4 w-full rounded-md border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+							>
+								{importExportBusy ? "Procesando..." : importExportMode === "import" ? "Importar" : "Exportar"}
+							</button>
 						</div>
 					</div>
 				) : null}

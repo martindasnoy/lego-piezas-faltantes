@@ -7,12 +7,16 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 
+const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
+const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
+
 type UserList = {
 	id: string;
 	name: string;
 	is_public: boolean;
 	pieces_count: number;
 	lots_count: number;
+	is_auto_generated: boolean;
 };
 
 export default function DashboardPage() {
@@ -84,10 +88,36 @@ export default function DashboardPage() {
 				is_public: Boolean(list.is_public),
 				lots_count: counts.lots,
 				pieces_count: counts.pieces,
+				is_auto_generated: [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES].includes(String(list.name ?? "").trim()),
 			};
 		});
 
-		setLists(enriched);
+		const autoLists = enriched.filter((list) => list.is_auto_generated);
+		const manualLists = enriched.filter((list) => !list.is_auto_generated);
+
+		if (autoLists.length === 0) {
+			setLists(manualLists);
+			return;
+		}
+
+		const mergedAuto = autoLists.reduce((acc, list) => ({
+			...acc,
+			id: acc.id || list.id,
+			name: AUTO_MINIFIG_LIST_NAME,
+			is_public: acc.is_public || list.is_public,
+			is_auto_generated: true,
+			lots_count: acc.lots_count + list.lots_count,
+			pieces_count: acc.pieces_count + list.pieces_count,
+		}), {
+			id: "",
+			name: AUTO_MINIFIG_LIST_NAME,
+			is_public: false,
+			is_auto_generated: true,
+			lots_count: 0,
+			pieces_count: 0,
+		});
+
+		setLists([...manualLists, mergedAuto]);
 	}
 
 	useEffect(() => {
@@ -233,6 +263,11 @@ export default function DashboardPage() {
 
 	async function confirmDeleteList() {
 		if (!deleteTarget) return;
+		if (deleteTarget.is_auto_generated) {
+			setDeleteTarget(null);
+			setMessage("La lista automatica de minifiguras no se puede eliminar.");
+			return;
+		}
 
 		setDeletingListId(deleteTarget.id);
 		setMessage(null);
@@ -481,13 +516,13 @@ export default function DashboardPage() {
 														<Link href={`/dashboard/lists/${list.id}`} className="text-base font-semibold text-slate-900 hover:underline">
 															{list.name}
 														</Link>
-														<button
-															type="button"
-															onClick={() => openRenameList(list)}
-															disabled={renamingListId === list.id}
-															className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-															title="Editar nombre"
-														>
+													<button
+														type="button"
+														onClick={() => openRenameList(list)}
+														disabled={renamingListId === list.id || list.is_auto_generated}
+														className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+														title="Editar nombre"
+													>
 															✎
 														</button>
 													</div>
@@ -500,23 +535,24 @@ export default function DashboardPage() {
 										<div className="w-full md:w-auto">
 											<div className="flex flex-wrap items-center justify-between gap-2 md:flex-col md:items-end md:justify-start">
 												<div className="flex items-center gap-2">
-													<button
-														type="button"
-														onClick={() => switchVisibility(list.id, false)}
-														disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
-														className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-													>
-														Privado
-													</button>
-													<button
-														type="button"
-														onClick={() => switchVisibility(list.id, true)}
-														disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
-														className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-													>
-														Publico
-													</button>
-												</div>
+												<button
+													type="button"
+													onClick={() => switchVisibility(list.id, false)}
+													disabled={switchingId === list.id || !list.is_public || deletingListId === list.id}
+													className={`rounded-md px-2.5 py-1 text-xs font-medium ${!list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+												>
+													Privado
+												</button>
+												<button
+													type="button"
+													onClick={() => switchVisibility(list.id, true)}
+													disabled={switchingId === list.id || list.is_public || deletingListId === list.id}
+													className={`rounded-md px-2.5 py-1 text-xs font-medium ${list.is_public ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
+												>
+													Publico
+												</button>
+											</div>
+											{list.is_auto_generated ? null : (
 												<button
 													type="button"
 													onClick={() => setDeleteTarget(list)}
@@ -525,7 +561,8 @@ export default function DashboardPage() {
 												>
 													Eliminar lista
 												</button>
-											</div>
+											)}
+										</div>
 										</div>
 										</div>
 									</li>
@@ -545,18 +582,34 @@ export default function DashboardPage() {
 						</ul>
 					</div>
 
-					<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
-						<div className="flex justify-center">
-							<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
+					<div className="flex flex-col gap-4">
+						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
+							<div className="flex justify-center">
+								<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
+							</div>
+							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
+							<div className="mt-4 flex justify-center">
+								<Link
+									href="/pool"
+									className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+								>
+									Pool de items deseados
+								</Link>
+							</div>
 						</div>
-						<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
-						<div className="mt-4 flex justify-center">
-							<Link
-								href="/pool"
-								className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
-							>
-								Pool de items deseados
-							</Link>
+
+						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
+							<div className="flex justify-center">
+								<img src="/Minifigura_silueta.png?v=3" alt="Minifiguras" className="h-28 w-28 object-contain" />
+							</div>
+							<div className="mt-4 flex justify-center">
+								<Link
+									href="/dashboard/minifiguras"
+									className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+								>
+									Minifiguras CMF
+								</Link>
+							</div>
 						</div>
 					</div>
 				</section>

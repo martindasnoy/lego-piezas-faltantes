@@ -8,9 +8,16 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { gobrickColors } from "@/lib/gobrick-colors";
 
+const AUTO_MINIFIG_LIST_NAMES = [
+	"Piezas Faltantes de Minifiguras",
+	"Pares Faltantes de Minifcuras",
+	"Faltantes Minifiguras",
+];
+
 type PoolLot = {
 	id: string;
 	list_id: string;
+	list_name?: string | null;
 	owner_id: string;
 	part_num: string;
 	part_name: string | null;
@@ -51,7 +58,14 @@ export default function PoolPage() {
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
+	const [showPiecesLots, setShowPiecesLots] = useState(true);
+	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+
+	function isMinifigurePartsListName(listName: string | null | undefined) {
+		const normalized = String(listName ?? "").trim();
+		return AUTO_MINIFIG_LIST_NAMES.includes(normalized);
+	}
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -86,6 +100,7 @@ export default function PoolPage() {
 				const lots = ((rpcData as RpcPoolLot[]) ?? []).map((lot) => ({
 					id: lot.id,
 					list_id: lot.list_id,
+					list_name: lot.list_name,
 					owner_id: lot.owner_id,
 					part_num: lot.part_num,
 					part_name: lot.part_name,
@@ -300,8 +315,17 @@ export default function PoolPage() {
 		);
 	}, [publicLots]);
 
+	const filteredLots = useMemo<PoolLot[]>(() => {
+		return publicLots.filter((lot) => {
+			const isMinifigLot = isMinifigurePartsListName(lot.list_name);
+			if (isMinifigLot && !showMinifigurePartsLots) return false;
+			if (!isMinifigLot && !showPiecesLots) return false;
+			return true;
+		});
+	}, [publicLots, showPiecesLots, showMinifigurePartsLots]);
+
 	const lotCards = useMemo<PoolLot[]>(() => {
-		return [...publicLots]
+		return [...filteredLots]
 			.sort((a, b) => {
 				if (sortBy === "usuario") {
 					const byOwner = (a.owner_name || "").localeCompare(b.owner_name || "", "es", { sensitivity: "base" });
@@ -314,7 +338,7 @@ export default function PoolPage() {
 				if (byPart !== 0) return byPart;
 				return a.part_num.localeCompare(b.part_num, "es", { sensitivity: "base" });
 			});
-	}, [publicLots, sortBy]);
+	}, [filteredLots, sortBy]);
 
 	if (loading) {
 		return (
@@ -359,6 +383,20 @@ export default function PoolPage() {
 									<option value="pieza">Pieza</option>
 									<option value="usuario">Usuario</option>
 								</select>
+								<button
+									type="button"
+									onClick={() => setShowPiecesLots((current) => !current)}
+									className={`rounded-md border px-2 py-1 text-xs font-semibold ${showPiecesLots ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+								>
+									Piezas
+								</button>
+								<button
+									type="button"
+									onClick={() => setShowMinifigurePartsLots((current) => !current)}
+									className={`rounded-md border px-2 py-1 text-xs font-semibold ${showMinifigurePartsLots ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+								>
+									Partes Minifiguras
+								</button>
 							</div>
 						</div>
 						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />
@@ -367,7 +405,9 @@ export default function PoolPage() {
 
 				{lotCards.length === 0 ? (
 					<section className="rounded-xl border border-slate-200 p-5 text-sm text-slate-600">
-						No hay lotes publicos por ahora. Si ya hay listas publicas, revisa el orden SQL en `web/supabase/README.md`.
+						{publicLots.length === 0
+							? "No hay lotes publicos por ahora. Si ya hay listas publicas, revisa el orden SQL en `web/supabase/README.md`."
+							: "No hay lotes con los filtros actuales. Activa Piezas y/o Partes Minifiguras."}
 					</section>
 				) : (
 					<section className="space-y-2">

@@ -5,6 +5,7 @@ const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 
 type RebrickablePart = {
 	part_num: string;
+	name?: string | null;
 	part_img_url?: string | null;
 };
 
@@ -51,6 +52,7 @@ export async function GET(request: Request) {
 		const payload = (await response.json()) as { results?: RebrickablePart[] };
 		const results = (payload.results ?? []).map((part) => ({
 			part_num: part.part_num,
+			name: part.name ?? null,
 			part_img_url: part.part_img_url ?? null,
 		}));
 

@@ -26,4 +26,19 @@ jobs:
             curl -fsSL -X POST "$BASE_URL/api/rebrickable/prewarm?category_id=$id" -H "x-prewarm-token: $TOKEN" > /dev/null
           done
 
+          echo "Category prewarm done"
+
+      - name: Prewarm collectible minifigure themes
+        run: |
+          BASE_URL="${{ secrets.PREWARM_BASE_URL }}"
+          TOKEN="${{ secrets.REBRICKABLE_PREWARM_TOKEN }}"
+
+          theme_ids=$(curl -fsSL "$BASE_URL/api/rebrickable/prewarm?list=minifigures" -H "x-prewarm-token: $TOKEN" | jq -r '.results[].id')
+
+          for theme_id in $theme_ids; do
+            echo "Prewarming minifigure theme $theme_id"
+            curl -fsSL -X POST "$BASE_URL/api/rebrickable/prewarm?minifigure_theme_id=$theme_id" -H "x-prewarm-token: $TOKEN" > /dev/null
+            sleep 1
+          done
+
           echo "Done"
