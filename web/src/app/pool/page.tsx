@@ -8,6 +8,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { gobrickColors } from "@/lib/gobrick-colors";
 import { enforceSessionTtl } from "@/lib/session-ttl";
+import { canAccessModule } from "@/lib/feature-flags";
 
 const AUTO_MINIFIG_LIST_NAMES = [
 	"Piezas Faltantes de Minifiguras",
@@ -92,6 +93,12 @@ export default function PoolPage() {
 
 				if (!user) {
 					router.replace("/");
+					return;
+				}
+
+				const canAccessPoolWanted = await canAccessModule(supabase, user.email, "poolWanted");
+				if (!canAccessPoolWanted) {
+					router.replace("/dashboard");
 					return;
 				}
 

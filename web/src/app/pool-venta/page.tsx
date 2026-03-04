@@ -8,6 +8,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { gobrickColors } from "@/lib/gobrick-colors";
 import { enforceSessionTtl } from "@/lib/session-ttl";
+import { canAccessModule } from "@/lib/feature-flags";
 
 type PoolLot = {
 	id: string;
@@ -64,6 +65,12 @@ export default function PoolVentaPage() {
 
 				if (!user) {
 					router.replace("/");
+					return;
+				}
+
+				const canAccessPoolSale = await canAccessModule(supabase, user.email, "poolSale");
+				if (!canAccessPoolSale) {
+					router.replace("/dashboard");
 					return;
 				}
 

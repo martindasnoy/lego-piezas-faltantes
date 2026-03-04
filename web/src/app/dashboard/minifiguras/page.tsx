@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getHiddenSearchTagsForMinifigure } from "@/lib/minifigure-search-tags";
+import { canAccessModule } from "@/lib/feature-flags";
 
 const MINIFIGURAS_THEME_IDS_KEY = "minifiguras_theme_ids";
 const MINIFIGURAS_FAVORITE_THEME_IDS_KEY = "minifiguras_favorite_theme_ids";
@@ -155,6 +157,7 @@ function matchesSearchTerms(input: string, terms: string[]) {
 }
 
 export default function MinifigurasPage() {
+	const router = useRouter();
 	const [showFilterModal, setShowFilterModal] = useState(false);
 	const [searchInput, setSearchInput] = useState("");
 	const [viewMode, setViewMode] = useState<FigureViewMode>("all");
@@ -250,6 +253,12 @@ export default function MinifigurasPage() {
 
 				if (!mounted || !user) return;
 
+				const canAccessMinifiguras = await canAccessModule(supabase, user.email, "minifiguras");
+				if (!canAccessMinifiguras) {
+					router.replace("/dashboard");
+					return;
+				}
+
 				const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
 				userMetadataRef.current = metadata;
 
@@ -323,7 +332,7 @@ export default function MinifigurasPage() {
 		return () => {
 			mounted = false;
 		};
-	}, []);
+	}, [router]);
 
 	async function loadThemes() {
 		if (themes.length > 0) return themes;

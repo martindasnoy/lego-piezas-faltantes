@@ -3,11 +3,14 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import Lottie from "lottie-react";
 import { getSupabaseClient } from "@/lib/supabase";
 import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-category-flags";
 import { enforceSessionTtl } from "@/lib/session-ttl";
+import { canAccessModule } from "@/lib/feature-flags";
+import matchIconAnimation from "@/lib/match-icon.json";
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
@@ -46,6 +49,34 @@ type OfferRpcRow = {
 	offered_by_name: string | null;
 	quantity: number;
 	status: string;
+};
+
+type MatchSummaryByLot = Record<
+	string,
+	{
+		matches: number;
+		pieces: number;
+		byUser: Array<{
+			matchListItemId: string;
+			name: string;
+			pieces: number;
+			value: number | null;
+			myReservedQuantity: number;
+			totalReservedQuantity: number;
+			reservableQuantity: number;
+		}>;
+	}
+>;
+
+type MatchRpcRow = {
+	list_item_id: string;
+	matched_list_item_id: string;
+	matched_owner_name: string | null;
+	matched_quantity: number;
+	matched_value: number | null;
+	my_reserved_quantity: number;
+	total_reserved_quantity: number;
+	reservable_quantity: number;
 };
 
 type CatalogCategory = {
@@ -90,7 +121,11 @@ export default function ListDetailPage() {
 	const [colorPickerSearch, setColorPickerSearch] = useState("");
 	const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 	const [offersByLot, setOffersByLot] = useState<OfferSummaryByLot>({});
+	const [matchesByLot, setMatchesByLot] = useState<MatchSummaryByLot>({});
 	const [offerDetailsLotId, setOfferDetailsLotId] = useState<string | null>(null);
+	const [matchDetailsLotId, setMatchDetailsLotId] = useState<string | null>(null);
+	const [reserveQtyByMatchedLot, setReserveQtyByMatchedLot] = useState<Record<string, number>>({});
+	const [reservingMatchLotId, setReservingMatchLotId] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
 	const [showImportExportModal, setShowImportExportModal] = useState(false);
@@ -188,6 +223,30 @@ export default function ListDetailPage() {
 		if (!offerDetailsLotId) return null;
 		return offersByLot[offerDetailsLotId] ?? null;
 	}, [offerDetailsLotId, offersByLot]);
+
+	const activeMatchDetailsLot = useMemo(() => {
+		if (!matchDetailsLotId) return null;
+		return lots.find((lot) => lot.id === matchDetailsLotId) ?? null;
+	}, [matchDetailsLotId, lots]);
+
+	const activeMatchDetailsSummary = useMemo(() => {
+		if (!matchDetailsLotId) return null;
+		return matchesByLot[matchDetailsLotId] ?? null;
+	}, [matchDetailsLotId, matchesByLot]);
+
+	useEffect(() => {
+		if (!activeMatchDetailsSummary) return;
+		setReserveQtyByMatchedLot((current) => {
+			const next = { ...current };
+			for (const row of activeMatchDetailsSummary.byUser) {
+				if (!row.matchListItemId) continue;
+				if (next[row.matchListItemId] == null) {
+					next[row.matchListItemId] = row.myReservedQuantity > 0 ? row.myReservedQuantity : row.reservableQuantity;
+				}
+			}
+			return next;
+		});
+	}, [activeMatchDetailsSummary]);
 
 	function normalizePartCodeInput(raw: string) {
 		const trimmed = raw.trim();
@@ -319,6 +378,26 @@ export default function ListDetailPage() {
 					return;
 				}
 
+				const listNameNormalized = String((listData as ListInfo).name ?? "").trim();
+				const isSaleTargetList = listNameNormalized.toLowerCase().startsWith(SALE_LIST_PREFIX);
+				const isAutoMinifigTargetList = [AUTO_MINIFIG_LIST_NAME, ...LEGACY_AUTO_MINIFIG_LIST_NAMES].includes(listNameNormalized);
+
+				if (isSaleTargetList) {
+					const canAccessPoolSale = await canAccessModule(supabase, user.email, "poolSale");
+					if (!canAccessPoolSale) {
+						router.replace("/dashboard");
+						return;
+					}
+				}
+
+				if (isAutoMinifigTargetList) {
+					const canAccessMinifiguras = await canAccessModule(supabase, user.email, "minifiguras");
+					if (!canAccessMinifiguras) {
+						router.replace("/dashboard");
+						return;
+					}
+				}
+
 				setList(listData as ListInfo);
 
 				let lotRows: Array<Partial<Lot>> | null = null;
@@ -362,6 +441,7 @@ export default function ListDetailPage() {
 						})),
 					);
 					void loadOffersForLots(loadedLots.map((lot) => String(lot.id)));
+					void loadMatchesForLots(loadedLots.map((lot) => String(lot.id)));
 				}
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir la lista.";
@@ -575,23 +655,142 @@ export default function ListDetailPage() {
 		}
 	}
 
+	async function loadMatchesForLots(lotIds: string[]) {
+		if (lotIds.length === 0) {
+			setMatchesByLot({});
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase.rpc("get_matches_for_owner_list", {
+				p_list_id: String(listId),
+			});
+
+			if (error) {
+				console.error("get_matches_for_owner_list error", error);
+				setMatchesByLot({});
+				return;
+			}
+
+			const summary: MatchSummaryByLot = {};
+			for (const row of (data as MatchRpcRow[]) ?? []) {
+				const key = String(row.list_item_id);
+				if (!lotIds.includes(key)) continue;
+
+				const current = summary[key] ?? { matches: 0, pieces: 0, byUser: [] };
+				const userName = row.matched_owner_name?.trim() || "Usuario";
+				current.byUser.push({
+					matchListItemId: String(row.matched_list_item_id ?? ""),
+					name: userName,
+					pieces: Number(row.matched_quantity ?? 0),
+					value: typeof row.matched_value === "number" ? row.matched_value : null,
+					myReservedQuantity: Number(row.my_reserved_quantity ?? 0),
+					totalReservedQuantity: Number(row.total_reserved_quantity ?? 0),
+					reservableQuantity: Number(row.reservable_quantity ?? 0),
+				});
+
+				summary[key] = {
+					matches: current.matches + 1,
+					pieces: current.pieces + Number(row.matched_quantity ?? 0),
+					byUser: current.byUser,
+				};
+			}
+
+			setMatchesByLot(summary);
+		} catch (error) {
+			console.error("loadMatchesForLots error", error);
+			setMatchesByLot({});
+		}
+	}
+
+	async function reserveMatchedLot(matchedListItemId: string, maxAllowed: number) {
+		const desiredRaw = reserveQtyByMatchedLot[matchedListItemId];
+		const parsed = Math.floor(Number(desiredRaw));
+		if (!Number.isFinite(parsed) || parsed < 1) {
+			setMessage("La reserva debe ser mayor a 0.");
+			return;
+		}
+
+		const quantity = Math.min(parsed, Math.max(0, Math.floor(maxAllowed)));
+		if (quantity < 1) {
+			setMessage("No hay stock disponible para reservar en este momento.");
+			return;
+		}
+
+		setReservingMatchLotId(matchedListItemId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.rpc("toggle_offer_for_lot", {
+				p_list_item_id: matchedListItemId,
+				p_quantity: quantity,
+			});
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			const currentLotIds = lots.map((lot) => String(lot.id));
+			void loadMatchesForLots(currentLotIds);
+			setMessage("Reserva actualizada.");
+		} finally {
+			setReservingMatchLotId(null);
+		}
+	}
+
+	async function clearReserveForMatchedLot(matchedListItemId: string) {
+		setReservingMatchLotId(matchedListItemId);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.rpc("toggle_offer_for_lot", {
+				p_list_item_id: matchedListItemId,
+				p_quantity: 0,
+			});
+
+			if (error) {
+				setMessage(error.message);
+				return;
+			}
+
+			const currentLotIds = lots.map((lot) => String(lot.id));
+			void loadMatchesForLots(currentLotIds);
+			void loadOffersForLots(currentLotIds);
+			setReserveQtyByMatchedLot((current) => ({
+				...current,
+				[matchedListItemId]: 0,
+			}));
+			setMessage("Reserva quitada.");
+		} finally {
+			setReservingMatchLotId(null);
+		}
+	}
+
 	useEffect(() => {
 		if (loading || !list) return;
 
 		const lotIds = lots.map((lot) => String(lot.id));
 		if (lotIds.length === 0) {
 			setOffersByLot({});
+			setMatchesByLot({});
 			return;
 		}
 
 		void loadOffersForLots(lotIds);
+		void loadMatchesForLots(lotIds);
 
 		const intervalId = window.setInterval(() => {
 			void loadOffersForLots(lotIds);
+			void loadMatchesForLots(lotIds);
 		}, 6000);
 
 		function onFocus() {
 			void loadOffersForLots(lotIds);
+			void loadMatchesForLots(lotIds);
 		}
 
 		window.addEventListener("focus", onFocus);
@@ -672,6 +871,7 @@ export default function ListDetailPage() {
 				void loadPartImages([{ part_num: partNum, color_name: color || null }]);
 			}
 			void loadOffersForLots([...(lots.map((lot) => String(lot.id))), String((data as Lot).id)]);
+			void loadMatchesForLots([...(lots.map((lot) => String(lot.id))), String((data as Lot).id)]);
 			setPartInput("");
 			setSelectedPart(null);
 			setSuggestions([]);
@@ -1118,6 +1318,7 @@ export default function ListDetailPage() {
 					})),
 				);
 				void loadOffersForLots([...(lots.map((lot) => String(lot.id))), ...importedLots.map((lot) => String(lot.id))]);
+				void loadMatchesForLots([...(lots.map((lot) => String(lot.id))), ...importedLots.map((lot) => String(lot.id))]);
 			}
 
 			setImportRawInput("");
@@ -1214,6 +1415,8 @@ export default function ListDetailPage() {
 					},
 				]);
 			}
+
+			void loadMatchesForLots(lots.map((lot) => String(lot.id)));
 		} finally {
 			setUpdatingLotColorId(null);
 		}
@@ -1239,6 +1442,11 @@ export default function ListDetailPage() {
 
 			setLots((current) => current.filter((lot) => lot.id !== lotId));
 			setOffersByLot((current) => {
+				const next = { ...current };
+				delete next[lotId];
+				return next;
+			});
+			setMatchesByLot((current) => {
 				const next = { ...current };
 				delete next[lotId];
 				return next;
@@ -1485,45 +1693,71 @@ export default function ListDetailPage() {
 					) : (
 						<ul className="mt-4 space-y-3">
 							{lots.map((lot) => (
-								<li key={lot.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+								<li
+									key={lot.id}
+									className={`rounded-lg border px-3 py-2 ${matchesByLot[String(lot.id)] ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}
+								>
 									<div className="flex items-start gap-3 text-sm text-slate-800">
-									{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
-										<img
-											src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
-											alt={lot.part_name || lot.part_num}
-											loading="lazy"
-											decoding="async"
-											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-										/>
-									) : (
-										<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
-											<span className="leading-none">IMG</span>
-											<span className="leading-none">Sin imagen</span>
+										{matchesByLot[String(lot.id)] ? (
+											<button
+												type="button"
+												onClick={() => setMatchDetailsLotId(String(lot.id))}
+												className="hidden h-7 w-7 shrink-0 items-center justify-center self-center rounded-md border border-black bg-black p-0.5 hover:bg-slate-800 sm:inline-flex"
+												title="Hay match"
+											>
+												<Lottie animationData={matchIconAnimation} loop className="h-5 w-5" style={{ filter: "sepia(1) saturate(8) hue-rotate(340deg) brightness(1.15)" }} />
+											</button>
+										) : null}
+										<div className="flex w-16 shrink-0 flex-col items-center gap-1">
+											{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
+												<img
+													src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
+													alt={lot.part_name || lot.part_num}
+													loading="lazy"
+													decoding="async"
+													className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
+												/>
+											) : (
+												<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
+													<span className="leading-none">IMG</span>
+													<span className="leading-none">Sin imagen</span>
+												</div>
+											)}
+											{matchesByLot[String(lot.id)] ? (
+												<button
+													type="button"
+													onClick={() => setMatchDetailsLotId(String(lot.id))}
+													className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black bg-black p-0.5 hover:bg-slate-800 sm:hidden"
+													title="Hay match"
+												>
+													<Lottie animationData={matchIconAnimation} loop className="h-5 w-5" style={{ filter: "sepia(1) saturate(8) hue-rotate(340deg) brightness(1.15)" }} />
+												</button>
+											) : null}
 										</div>
-									)}
 
 										<div className="min-w-0 flex-1">
 											<div className="flex items-start justify-between gap-2">
 												<p className="overflow-hidden text-slate-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] sm:max-w-[520px]">
 													{lot.part_name || "Sin nombre"}
 												</p>
-												{offersByLot[String(lot.id)] ? (
+											<div className="flex items-center gap-2">
+											{offersByLot[String(lot.id)] ? (
 													<div className="group relative">
 														<button
 															type="button"
 															onClick={() => setOfferDetailsLotId(String(lot.id))}
 															className="w-fit max-w-full rounded-md bg-emerald-100 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-200"
 														>
-															Ya tuviste ofertas
+															{isSaleList ? "Ya en venta" : "Ya tuviste ofertas"}
 														</button>
 														<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
 															Bravo! se encontraron piezas!
 														</div>
-													</div>
+														</div>
 												) : (
 													<div className="group relative">
 														<div className="w-fit max-w-full rounded-md bg-slate-200 px-3 py-1 text-xs text-slate-600">
-															Sin ofertas
+															{isSaleList ? "Sin venta" : "Sin ofertas"}
 														</div>
 														<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
 															Todavia nadie encontro esta pieza
@@ -1531,9 +1765,11 @@ export default function ListDetailPage() {
 													</div>
 												)}
 											</div>
+										</div>
 
-									<div className="mt-2 flex items-center justify-between gap-2">
-										<div className="flex items-center gap-2">
+									<div className="mt-2 flex items-start justify-between gap-2">
+										<div className="flex flex-col gap-2">
+											<div className="flex items-center gap-2">
 											<button
 												type="button"
 												onClick={() => openLotColorPicker(lot.id)}
@@ -1548,6 +1784,7 @@ export default function ListDetailPage() {
 												<span className="block w-full truncate text-left">{lot.color_name || "Sin color"}</span>
 											</button>
 											<span className="font-semibold text-slate-900">#{lot.part_num}</span>
+											<div className="hidden items-center gap-2 sm:flex">
 											<input
 												type="number"
 												min={1}
@@ -1590,6 +1827,53 @@ export default function ListDetailPage() {
 													/>
 												</div>
 											) : null}
+											</div>
+											</div>
+
+											<div className="flex items-center gap-2 sm:hidden">
+												<input
+													type="number"
+													min={1}
+													value={lot.quantity}
+													onChange={(event) => {
+														const parsed = Number(event.target.value);
+														if (!Number.isFinite(parsed)) return;
+														setLocalLotQuantity(lot.id, Math.max(1, parsed));
+													}}
+													onBlur={(event) => {
+														const parsed = Number(event.target.value);
+														void persistLotQuantity(lot.id, Number.isFinite(parsed) ? parsed : lot.quantity);
+													}}
+													disabled={updatingLotId === lot.id}
+													className="quantity-input w-16 appearance-auto rounded border border-slate-300 px-2 py-1 text-center text-sm disabled:opacity-50"
+												/>
+												{isSaleList ? (
+													<div className="relative w-24">
+														<span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs font-bold text-white">$</span>
+														<input
+															type="number"
+															min={0}
+															step={1}
+															inputMode="numeric"
+															value={lot.value ?? ""}
+															onChange={(event) => {
+																const next = parseValueInput(event.target.value);
+																if (next !== null || event.target.value.trim() === "") {
+																	setLocalLotValue(lot.id, next);
+																}
+															}}
+															onBlur={(event) => {
+																const raw = event.target.value;
+																if (!raw.trim()) return;
+																void persistLotValue(lot.id, raw);
+															}}
+															disabled={updatingLotValueId === lot.id}
+															placeholder="0"
+															className="w-full rounded border border-[#005f9a] bg-[#006eb2] py-1 pl-5 pr-2 text-center text-sm font-bold text-white disabled:opacity-50 placeholder:text-white/70"
+														/>
+													</div>
+												) : null}
+											</div>
 										</div>
 
 										<div className="flex items-center gap-1">
@@ -1678,7 +1962,7 @@ export default function ListDetailPage() {
 					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setOfferDetailsLotId(null)}>
 						<div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
 							<div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
-								<h3 className="text-lg font-semibold text-slate-900">Ofertas recibidas</h3>
+								<h3 className="text-lg font-semibold text-slate-900">{isSaleList ? "Venta" : "Ofertas recibidas"}</h3>
 								<button
 									type="button"
 									onClick={() => setOfferDetailsLotId(null)}
@@ -1693,10 +1977,113 @@ export default function ListDetailPage() {
 								{activeOfferDetailsSummary.byUser.map((userRow) => (
 									<li key={userRow.name} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
 										<span className="text-slate-900">{userRow.name}</span>
-										<span className="font-semibold text-slate-700">{userRow.pieces} piezas</span>
+										<span className="font-semibold text-black">{userRow.pieces} piezas</span>
 									</li>
 								))}
 							</ul>
+						</div>
+					</div>
+				) : null}
+
+				{activeMatchDetailsLot && activeMatchDetailsSummary ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setMatchDetailsLotId(null)}>
+						<div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-end justify-between gap-3 border-b border-slate-200 pb-2">
+								<h3 className="text-3xl font-semibold text-slate-900">Hay match!</h3>
+								<img src="/MrGold.png" alt="Mr Gold" className="h-[12.5rem] w-[12.5rem] object-contain" />
+							</div>
+
+							<p className="mt-2 text-sm text-slate-700">
+								{activeMatchDetailsLot.part_name || activeMatchDetailsLot.part_num}
+							</p>
+							<p className="mt-1 text-xs text-slate-600">
+								Se encontro coincidencia con {activeMatchDetailsSummary.matches} usuario{activeMatchDetailsSummary.matches === 1 ? "" : "s"}.
+							</p>
+							<ul className="mt-3 space-y-2">
+								{activeMatchDetailsSummary.byUser.map((userRow) => (
+									<li key={userRow.matchListItemId || userRow.name} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+										{!isSaleList ? (
+											<p className="font-chewy text-xl text-slate-900">
+												{userRow.name} vende {userRow.pieces} piezas{typeof userRow.value === "number" ? ` * $${userRow.value}` : ""}
+											</p>
+										) : (
+											<p className="font-chewy text-xl text-slate-900">
+												{userRow.name} necesita {userRow.pieces} piezas. Pidio {offersByLot[String(activeMatchDetailsLot.id)]?.byUser.find((offerUser) => offerUser.name === userRow.name)?.pieces ?? 0}
+											</p>
+										)}
+
+										{!isSaleList ? (
+											<>
+												<div className="mt-2 flex items-center justify-start gap-2">
+													<button
+														type="button"
+														onClick={() => void reserveMatchedLot(userRow.matchListItemId, userRow.reservableQuantity)}
+														disabled={reservingMatchLotId === userRow.matchListItemId || userRow.reservableQuantity < 1}
+														className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+													>
+														Reservo
+													</button>
+													<input
+														type="number"
+														min={0}
+														max={Math.max(0, userRow.reservableQuantity)}
+														step={1}
+														value={Math.max(
+															0,
+															Math.min(
+																Math.floor(
+																	Number(
+																		reserveQtyByMatchedLot[userRow.matchListItemId] ?? Math.max(Number(userRow.pieces ?? 0), Number(activeMatchDetailsLot.quantity ?? 0)),
+																	),
+																),
+																Math.max(0, userRow.reservableQuantity),
+															),
+														)}
+														onChange={(event) => {
+															const parsed = Math.floor(Number(event.target.value));
+															if (!Number.isFinite(parsed)) return;
+															setReserveQtyByMatchedLot((current) => ({
+																...current,
+																[userRow.matchListItemId]: Math.max(
+																	0,
+																	Math.min(parsed, Math.max(0, userRow.reservableQuantity)),
+																),
+															}));
+														}}
+														className="w-20 rounded border border-slate-300 bg-white px-2 py-1 text-right text-sm font-semibold text-black"
+													/>
+													{userRow.myReservedQuantity > 0 ? (
+														<button
+															type="button"
+															onClick={() => void clearReserveForMatchedLot(userRow.matchListItemId)}
+															disabled={reservingMatchLotId === userRow.matchListItemId}
+															className="rounded-md border border-black bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-slate-100 disabled:opacity-50"
+														>
+															Quitar reserva
+														</button>
+													) : null}
+												</div>
+											</>
+										) : null}
+									</li>
+								))}
+							</ul>
+
+							{isSaleList ? (
+								<p className="mt-3 text-base font-semibold text-slate-900">
+									Quedan {Math.max(Number(activeMatchDetailsLot.quantity ?? 0) - Number(offersByLot[String(activeMatchDetailsLot.id)]?.pieces ?? 0), 0)} cantidad de piezas
+								</p>
+							) : null}
+
+							<div className="mt-4 flex justify-center">
+								<button
+									type="button"
+									onClick={() => setMatchDetailsLotId(null)}
+									className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
 						</div>
 					</div>
 				) : null}

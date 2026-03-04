@@ -22,6 +22,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
    - Agrega campo `value` en `list_items` para guardar valor por item en listas de venta.
 10. `app_feature_flags.sql`
    - Crea flags globales de modulos y permisos para que solo `martindasnoy@gmail.com` pueda editarlos desde MASTER.
+11. `matches_owner_rpc.sql`
+   - Crea RPC para detectar matches entre listas de deseo y listas de venta de otros usuarios (misma pieza + color).
 
 ## Verificacion rapida
 
