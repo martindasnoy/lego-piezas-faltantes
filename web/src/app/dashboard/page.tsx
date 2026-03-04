@@ -6,12 +6,13 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
+import { clearSessionStart, enforceSessionTtl } from "@/lib/session-ttl";
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
-const USER_FACE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const SALE_LIST_PREFIX = "Venta: ";
 const MASTER_EMAIL = "martindasnoy@gmail.com";
+const FACE_TOTAL = 20;
 
 type MasterModuleKey = "poolWanted" | "poolSale" | "minifiguras";
 type MasterModules = Record<MasterModuleKey, boolean>;
@@ -40,6 +41,15 @@ function isSaleListName(listName: string) {
 function getDisplayListName(listName: string) {
 	if (!isSaleListName(listName)) return listName;
 	return listName.replace(/^venta:\s*/i, "").trim();
+}
+
+function normalizeFaceValue(face: number) {
+	return Number.isFinite(face) && face >= 1 && face <= FACE_TOTAL ? face : 1;
+}
+
+function getFaceImagePath(face: number) {
+	const normalized = normalizeFaceValue(face);
+	return `/Cabeza_${String(normalized).padStart(2, "0")}.png`;
 }
 
 type UserList = {
@@ -187,6 +197,12 @@ export default function DashboardPage() {
 
 		async function loadDashboard() {
 			try {
+				const isSessionValid = await enforceSessionTtl();
+				if (!isSessionValid) {
+					router.replace("/");
+					return;
+				}
+
 				const supabase = getSupabaseClient();
 				const {
 					data: { user },
@@ -205,7 +221,7 @@ export default function DashboardPage() {
 
 				setDisplayName((user.user_metadata?.display_name as string) ?? "");
 				const storedFace = Number(user.user_metadata?.minifig_face ?? 1);
-				setSelectedFace(Number.isFinite(storedFace) && storedFace >= 1 && storedFace <= 9 ? storedFace : 1);
+				setSelectedFace(normalizeFaceValue(storedFace));
 				await loadLists(user.id);
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir el dashboard.";
@@ -262,14 +278,16 @@ export default function DashboardPage() {
 			}
 
 			const rawName = newListName.trim();
-			const name = createListKind === "sale" && rawName ? (rawName.startsWith(SALE_LIST_PREFIX) ? rawName : `${SALE_LIST_PREFIX}${rawName}`) : rawName;
+			const canUseSaleLists = isMasterUser || masterModules.poolSale;
+			const effectiveCreateListKind = createListKind === "sale" && canUseSaleLists ? "sale" : "wish";
+			const name = effectiveCreateListKind === "sale" && rawName ? (rawName.startsWith(SALE_LIST_PREFIX) ? rawName : `${SALE_LIST_PREFIX}${rawName}`) : rawName;
 			if (!name) {
 				setMessage("Escribe un nombre para la nueva lista.");
 				setSaving(false);
 				return;
 			}
 
-			const nextIsPublic = createListKind === "sale" ? true : isPublic;
+			const nextIsPublic = effectiveCreateListKind === "sale" ? true : isPublic;
 
 			const { error } = await supabase
 				.from("lists")
@@ -300,6 +318,7 @@ export default function DashboardPage() {
 	async function logout() {
 		const supabase = getSupabaseClient();
 		await supabase.auth.signOut();
+		clearSessionStart();
 		router.replace("/");
 	}
 
@@ -402,7 +421,7 @@ export default function DashboardPage() {
 	function openUserSettings() {
 		setSettingsNameInput(displayName || "");
 		setSettingsEmailInput(userEmail || "");
-		setSelectedFace((current) => (Number.isFinite(current) && current >= 1 && current <= 9 ? current : 1));
+		setSelectedFace((current) => normalizeFaceValue(current));
 		setShowPasswordModal(false);
 		setCurrentPasswordInput("");
 		setNewPasswordInput("");
@@ -426,7 +445,7 @@ export default function DashboardPage() {
 			const nextName = settingsNameInput.trim();
 			const nextEmail = settingsEmailInput.trim().toLowerCase();
 
-			const faceValue = Number.isFinite(selectedFace) && selectedFace >= 1 && selectedFace <= 9 ? selectedFace : 1;
+			const faceValue = normalizeFaceValue(selectedFace);
 			const updatePayload: {
 				data: { display_name: string; minifig_face: number };
 				email?: string;
@@ -683,7 +702,7 @@ export default function DashboardPage() {
 									</div>
 								</div>
 							</div>
-							<img src={`/Cara_minifig_${selectedFace}.svg`} alt="Avatar minifig" className="h-20 w-20 shrink-0 object-contain" />
+							<img src={getFaceImagePath(selectedFace)} alt="Avatar minifig" className="h-20 w-20 shrink-0 object-contain" />
 						</div>
 					</div>
 				</header>
@@ -703,18 +722,20 @@ export default function DashboardPage() {
 								Armá una lista de deseos y juntá en un solo lugar todas las piezas que te faltan.
 							</div>
 						</div>
-						<div className="group relative">
-							<button
-								type="button"
-								onClick={() => setCreateListKind("sale")}
-								className={`rounded-md px-3 py-1 text-xs font-semibold ${createListKind === "sale" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100"}`}
-							>
-								Lista de venta
-							</button>
-							<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
-								Creá listas para vender tus piezas y ponelas a circular en el pool con otros usuarios.
+						{showPoolSaleModule ? (
+							<div className="group relative">
+								<button
+									type="button"
+									onClick={() => setCreateListKind("sale")}
+									className={`rounded-md px-3 py-1 text-xs font-semibold ${createListKind === "sale" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+								>
+									Lista de venta
+								</button>
+								<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+									Creá listas para vender tus piezas y ponelas a circular en el pool con otros usuarios.
+								</div>
 							</div>
-						</div>
+						) : null}
 					</div>
 					<form onSubmit={createList} className="mt-3 space-y-3">
 						<div>
@@ -779,16 +800,20 @@ export default function DashboardPage() {
 							</li>
 						</ul>
 
-						<h2 className="mt-6 text-xl font-semibold text-slate-900">Tus listas de ventas creadas</h2>
-						<ul className="mt-4 space-y-3">
-							{saleLists.length === 0 ? (
-								<li className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-									Todavia no creaste listas de venta.
-								</li>
-							) : (
-								saleLists.map((list) => renderListItem(list))
-							)}
-						</ul>
+						{showPoolSaleModule ? (
+							<>
+								<h2 className="mt-6 text-xl font-semibold text-slate-900">Tus listas de ventas creadas</h2>
+								<ul className="mt-4 space-y-3">
+									{saleLists.length === 0 ? (
+										<li className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+											Todavia no creaste listas de venta.
+										</li>
+									) : (
+										saleLists.map((list) => renderListItem(list))
+									)}
+								</ul>
+							</>
+						) : null}
 					</div>
 
 					<div className="flex flex-col gap-4">
@@ -976,17 +1001,18 @@ export default function DashboardPage() {
 							>
 								Cambiar contrasena
 							</button>
-							<div className="mt-4 grid grid-cols-3 gap-2">
-								{USER_FACE_OPTIONS.map((faceNum) => {
+							<div className="mt-4 grid grid-cols-4 gap-2">
+								{Array.from({ length: FACE_TOTAL }, (_, index) => {
+									const faceNum = index + 1;
 									const isSelected = selectedFace === faceNum;
 									return (
 										<button
-											key={faceNum}
+											key={`slot-${faceNum}`}
 											type="button"
 											onClick={() => setSelectedFace(faceNum)}
-											className={`flex aspect-square w-full items-center justify-center rounded-md border p-1 ${isSelected ? "border-[#006eb2] bg-[#cfeeff]" : "border-slate-200 bg-slate-50"}`}
+											className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border p-1 ${isSelected ? "border-[#006eb2] bg-[#cfeeff]" : "border-slate-200 bg-slate-50"}`}
 										>
-											<img src={`/Cara_minifig_${faceNum}.svg`} alt={`Cara minifig ${faceNum}`} className="h-full w-full object-contain" />
+											<img src={getFaceImagePath(faceNum)} alt={`Cara minifig ${faceNum}`} className="h-full w-full object-contain" />
 										</button>
 									);
 								})}
@@ -1080,7 +1106,7 @@ export default function DashboardPage() {
 					>
 						Cerrar sesion
 					</button>
-					<p className="mt-2 text-center text-xs text-slate-500">Version by Martin Dasnoy - Faltantes_1.3</p>
+					<p className="mt-2 text-center text-xs text-slate-500">Version by Martin Dasnoy - Faltantes_1.4</p>
 				</div>
 			</main>
 		</div>

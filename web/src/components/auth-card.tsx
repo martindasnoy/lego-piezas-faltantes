@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { requestPasswordReset, signInUser, signUpUser } from "@/lib/auth";
+import { markSessionStart } from "@/lib/session-ttl";
 
 type Mode = "login" | "register";
 
@@ -51,6 +52,7 @@ export function AuthCard() {
 		setMessage(result.message);
 
 		if (result.ok && isLogin) {
+			markSessionStart();
 			router.push("/dashboard");
 		}
 

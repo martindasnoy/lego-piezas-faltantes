@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { gobrickColors } from "@/lib/gobrick-colors";
+import { enforceSessionTtl } from "@/lib/session-ttl";
 
 type OfferedRow = {
 	list_item_id: string;
@@ -35,6 +36,12 @@ export default function OfferedPage() {
 
 		async function loadData() {
 			try {
+				const isSessionValid = await enforceSessionTtl();
+				if (!isSessionValid) {
+					router.replace("/");
+					return;
+				}
+
 				const supabase = getSupabaseClient();
 				const {
 					data: { user },

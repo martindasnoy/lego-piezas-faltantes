@@ -4,7 +4,15 @@ const supabaseUrl = "https://etqtoerfzjaewrrlyhfa.supabase.co";
 const supabaseAnonKey = "sb_publishable_6otEjYUOTkbGjcjHMFCg3g_mS3voCBM";
 
 export const supabase =
-	supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+	supabaseUrl && supabaseAnonKey
+		? createClient(supabaseUrl, supabaseAnonKey, {
+			auth: {
+				persistSession: true,
+				autoRefreshToken: true,
+				detectSessionInUrl: true,
+			},
+		})
+		: null;
 
 export function getSupabaseClient() {
 	if (!supabase) {

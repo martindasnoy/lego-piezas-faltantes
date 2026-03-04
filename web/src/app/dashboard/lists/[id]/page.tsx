@@ -7,6 +7,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { gobrickColors, type GobrickColor } from "@/lib/gobrick-colors";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-category-flags";
+import { enforceSessionTtl } from "@/lib/session-ttl";
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
@@ -289,6 +290,12 @@ export default function ListDetailPage() {
 
 		async function loadDetail() {
 			try {
+				const isSessionValid = await enforceSessionTtl();
+				if (!isSessionValid) {
+					router.replace("/");
+					return;
+				}
+
 				const supabase = getSupabaseClient();
 				const {
 					data: { user },
