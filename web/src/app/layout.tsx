@@ -18,19 +18,23 @@ const chewy = Chewy({
 	subsets: ["latin"],
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lego-piezas-faltantes.pages.dev";
+const shareImagePath = "/share-cover.jpg?v=2";
+
 export const metadata: Metadata = {
-	metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://lego-piezas-faltantes.pages.dev"),
+	metadataBase: new URL(siteUrl),
 	title: "LEGO Piezas Faltantes",
 	description: "Gestiona deseos, ventas y matches de piezas LEGO.",
 	openGraph: {
 		title: "LEGO Piezas Faltantes",
 		description: "Gestiona deseos, ventas y matches de piezas LEGO.",
+		url: siteUrl,
 		type: "website",
 		locale: "es_AR",
 		siteName: "LEGO Piezas Faltantes",
 		images: [
 			{
-				url: "/share-cover.jpg",
+				url: shareImagePath,
 				width: 1200,
 				height: 630,
 				alt: "LEGO Piezas Faltantes",
@@ -41,7 +45,7 @@ export const metadata: Metadata = {
 		card: "summary_large_image",
 		title: "LEGO Piezas Faltantes",
 		description: "Gestiona deseos, ventas y matches de piezas LEGO.",
-		images: ["/share-cover.jpg"],
+		images: [shareImagePath],
 	},
 };
 

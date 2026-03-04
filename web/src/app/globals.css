@@ -47,3 +47,10 @@ h3 {
 	appearance: auto;
 	-moz-appearance: auto;
 }
+
+.bg-lego-tile {
+	background-color: #006eb2;
+	background-image: url("/Tile_BG.jpg");
+	background-repeat: repeat;
+	background-size: 30px 31px;
+}

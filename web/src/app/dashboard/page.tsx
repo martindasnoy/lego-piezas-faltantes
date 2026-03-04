@@ -650,7 +650,7 @@ export default function DashboardPage() {
 
 	if (loading) {
 		return (
-			<div className="font-chewy flex min-h-screen items-center justify-center bg-[#006eb2] px-6 text-center text-2xl text-white sm:text-3xl">
+			<div className="bg-lego-tile font-chewy flex min-h-screen items-center justify-center px-6 text-center text-2xl text-white sm:text-3xl">
 				{loadingMessage}
 			</div>
 		);
@@ -667,7 +667,7 @@ export default function DashboardPage() {
 	const saleLists = lists.filter((list) => isSaleListName(list.name));
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-4 py-6 sm:px-6 sm:py-8">
+		<div className="bg-lego-tile min-h-screen px-4 py-6 sm:px-6 sm:py-8">
 			<main className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-xl sm:p-8">
 				<header className="border-b border-slate-200 pb-5">
 					<div>

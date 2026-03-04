@@ -66,7 +66,7 @@ export default function ResetPasswordPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-6 py-12">
+		<div className="bg-lego-tile min-h-screen px-6 py-12">
 			<main className="mx-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-lg">
 				<h1 className="text-2xl font-semibold text-slate-900">Cambiar contrasena</h1>
 				<p className="mt-2 text-sm text-slate-600">

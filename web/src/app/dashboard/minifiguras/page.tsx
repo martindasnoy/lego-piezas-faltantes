@@ -1041,7 +1041,7 @@ export default function MinifigurasPage() {
 			: "";
 
 	return (
-		<div className="min-h-screen bg-[#006eb2] px-3 py-5 sm:px-5 sm:py-7">
+		<div className="bg-lego-tile min-h-screen px-3 py-5 sm:px-5 sm:py-7">
 			<main className="mx-auto w-full max-w-6xl rounded-2xl bg-white p-4 shadow-xl sm:p-6">
 				<div className="border-b border-slate-200 pb-4">
 					<div className="flex items-center justify-between gap-3">
