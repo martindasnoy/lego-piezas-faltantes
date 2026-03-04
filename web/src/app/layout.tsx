@@ -18,8 +18,8 @@ const chewy = Chewy({
 	subsets: ["latin"],
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lego-piezas-faltantes.pages.dev";
-const shareImagePath = "/share-cover.jpg?v=2";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lego-piezas-faltantes.martindasnoy.workers.dev";
+const shareImagePath = "/share-cover.jpg?v=3";
 
 export const metadata: Metadata = {
 	metadataBase: new URL(siteUrl),
