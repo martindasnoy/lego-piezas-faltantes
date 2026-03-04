@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,13 @@ type MasterModules = Record<MasterModuleKey, boolean>;
 type FeatureFlagRow = {
 	module_key: string;
 	enabled: boolean;
+};
+
+type RegisteredUserRow = {
+	user_id: string;
+	display_name: string;
+	email: string;
+	created_at: string;
 };
 
 const DEFAULT_MASTER_MODULES: MasterModules = {
@@ -52,6 +59,32 @@ function getFaceImagePath(face: number) {
 	return `/Cabeza_${String(normalized).padStart(2, "0")}.png`;
 }
 
+function SocialIcon({ platform, className = "h-8 w-8" }: { platform: "instagram" | "facebook"; className?: string }) {
+	if (platform === "facebook") {
+		return (
+			<svg viewBox="0 0 24 24" className={`${className} text-[#1877F2]`} fill="currentColor" aria-hidden="true">
+				<path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073c0 6.02 4.388 11.01 10.125 11.927v-8.437H7.078v-3.49h3.047V9.412c0-3.021 1.792-4.689 4.533-4.689 1.313 0 2.686.236 2.686.236v2.966h-1.514c-1.492 0-1.956.93-1.956 1.885v2.263h3.328l-.532 3.49h-2.796V24C19.612 23.083 24 18.093 24 12.073z" />
+			</svg>
+		);
+	}
+
+	return (
+		<svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+			<rect x="2" y="2" width="20" height="20" rx="5" fill="#E1306C" />
+			<circle cx="12" cy="12" r="4.2" fill="white" />
+			<circle cx="12" cy="12" r="2.2" fill="#E1306C" />
+			<circle cx="17.2" cy="6.8" r="1.3" fill="white" />
+		</svg>
+	);
+}
+
+type BalugMemberRow = {
+	display_name: string;
+	social_platform: "instagram" | "facebook" | null;
+	social_handle: string | null;
+	created_at: string;
+};
+
 type UserList = {
 	id: string;
 	name: string;
@@ -66,9 +99,18 @@ export default function DashboardPage() {
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const [userEmail, setUserEmail] = useState("");
 	const [displayName, setDisplayName] = useState("");
+	const [socialPlatform, setSocialPlatform] = useState<"instagram" | "facebook" | "">("instagram");
+	const [socialHandle, setSocialHandle] = useState("");
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [showMasterModal, setShowMasterModal] = useState(false);
+	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
 	const [masterModules, setMasterModules] = useState<MasterModules>(DEFAULT_MASTER_MODULES);
+	const [registeredUsers, setRegisteredUsers] = useState<RegisteredUserRow[]>([]);
+	const [loadingRegisteredUsers, setLoadingRegisteredUsers] = useState(false);
+	const [masterUsersSort, setMasterUsersSort] = useState<"created" | "alpha">("created");
+	const [showBalugMembersModal, setShowBalugMembersModal] = useState(false);
+	const [loadingBalugMembers, setLoadingBalugMembers] = useState(false);
+	const [balugMembers, setBalugMembers] = useState<BalugMemberRow[]>([]);
 	const [lists, setLists] = useState<UserList[]>([]);
 	const [newListName, setNewListName] = useState("");
 	const [isPublic, setIsPublic] = useState(false);
@@ -84,6 +126,8 @@ export default function DashboardPage() {
 	const [showUserSettings, setShowUserSettings] = useState(false);
 	const [settingsNameInput, setSettingsNameInput] = useState("");
 	const [settingsEmailInput, setSettingsEmailInput] = useState("");
+	const [settingsSocialPlatform, setSettingsSocialPlatform] = useState<"instagram" | "facebook" | "">("instagram");
+	const [settingsSocialHandle, setSettingsSocialHandle] = useState("");
 	const [selectedFace, setSelectedFace] = useState(1);
 	const [showPasswordModal, setShowPasswordModal] = useState(false);
 	const [currentPasswordInput, setCurrentPasswordInput] = useState("");
@@ -220,6 +264,10 @@ export default function DashboardPage() {
 				await loadMasterModules();
 
 				setDisplayName((user.user_metadata?.display_name as string) ?? "");
+				const metadataSocialPlatform = String(user.user_metadata?.social_platform ?? "").toLowerCase();
+				const metadataSocialHandle = String(user.user_metadata?.social_handle ?? "").trim();
+				setSocialPlatform(metadataSocialPlatform === "instagram" || metadataSocialPlatform === "facebook" ? metadataSocialPlatform : "instagram");
+				setSocialHandle(metadataSocialHandle);
 				const storedFace = Number(user.user_metadata?.minifig_face ?? 1);
 				setSelectedFace(normalizeFaceValue(storedFace));
 				await loadLists(user.id);
@@ -260,6 +308,66 @@ export default function DashboardPage() {
 			setMessage(error.message);
 		}
 	}
+
+	async function openMasterUsersModal() {
+		if (!isMasterUser) return;
+		setShowMasterUsersModal(true);
+		setLoadingRegisteredUsers(true);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase.rpc("get_registered_users_master");
+			if (error) {
+				setMessage(error.message);
+				setRegisteredUsers([]);
+				return;
+			}
+
+			setRegisteredUsers((data as RegisteredUserRow[] | null) ?? []);
+		} finally {
+			setLoadingRegisteredUsers(false);
+		}
+	}
+
+	async function openBalugMembersModal() {
+		setShowBalugMembersModal(true);
+		setLoadingBalugMembers(true);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase.rpc("get_balug_members_public");
+
+			if (error) {
+				setMessage(error.message);
+				setBalugMembers([]);
+				return;
+			}
+
+			setBalugMembers((data as BalugMemberRow[] | null) ?? []);
+		} finally {
+			setLoadingBalugMembers(false);
+		}
+	}
+
+	const sortedRegisteredUsers = useMemo(() => {
+		const users = [...registeredUsers];
+		if (masterUsersSort === "alpha") {
+			users.sort((a, b) => a.display_name.localeCompare(b.display_name, "es", { sensitivity: "base" }));
+			return users;
+		}
+
+		users.sort((a, b) => {
+			const aTime = Date.parse(a.created_at ?? "");
+			const bTime = Date.parse(b.created_at ?? "");
+			if (!Number.isFinite(aTime) && !Number.isFinite(bTime)) return 0;
+			if (!Number.isFinite(aTime)) return 1;
+			if (!Number.isFinite(bTime)) return -1;
+			return bTime - aTime;
+		});
+		return users;
+	}, [registeredUsers, masterUsersSort]);
 
 	async function createList(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -421,6 +529,8 @@ export default function DashboardPage() {
 	function openUserSettings() {
 		setSettingsNameInput(displayName || "");
 		setSettingsEmailInput(userEmail || "");
+		setSettingsSocialPlatform(socialPlatform || "instagram");
+		setSettingsSocialHandle(socialHandle || "");
 		setSelectedFace((current) => normalizeFaceValue(current));
 		setShowPasswordModal(false);
 		setCurrentPasswordInput("");
@@ -444,15 +554,19 @@ export default function DashboardPage() {
 			const supabase = getSupabaseClient();
 			const nextName = settingsNameInput.trim();
 			const nextEmail = settingsEmailInput.trim().toLowerCase();
+			const nextSocialPlatform = settingsSocialPlatform;
+			const nextSocialHandle = settingsSocialHandle.trim().replace(/^@+/, "");
 
 			const faceValue = normalizeFaceValue(selectedFace);
 			const updatePayload: {
-				data: { display_name: string; minifig_face: number };
+				data: { display_name: string; minifig_face: number; social_platform: string | null; social_handle: string | null };
 				email?: string;
 			} = {
 				data: {
 					display_name: nextName,
 					minifig_face: faceValue,
+					social_platform: nextSocialPlatform || null,
+					social_handle: nextSocialHandle || null,
 				},
 			};
 
@@ -468,6 +582,8 @@ export default function DashboardPage() {
 			}
 
 			setDisplayName(nextName);
+			setSocialPlatform(nextSocialPlatform);
+			setSocialHandle(nextSocialHandle);
 			setSelectedFace(faceValue);
 			if (nextEmail) {
 				setUserEmail(nextEmail);
@@ -659,6 +775,7 @@ export default function DashboardPage() {
 	const showPoolWantedModule = isMasterUser || masterModules.poolWanted;
 	const showPoolSaleModule = isMasterUser || masterModules.poolSale;
 	const showMinifigurasModule = isMasterUser || masterModules.minifiguras;
+	const hasSocialProfile = (socialPlatform === "instagram" || socialPlatform === "facebook") && Boolean(socialHandle.trim());
 	const wishLists = lists.filter((list) => {
 		if (isSaleListName(list.name)) return false;
 		if (!showMinifigurasModule && list.is_auto_generated) return false;
@@ -674,15 +791,6 @@ export default function DashboardPage() {
 						<div className="flex items-center justify-between gap-3">
 							<div className="flex min-w-0 items-center gap-2">
 								<h1 className="break-all text-3xl font-semibold text-slate-900 sm:text-5xl">{displayName || userEmail}</h1>
-								{isMasterUser ? (
-									<button
-										type="button"
-										onClick={() => setShowMasterModal(true)}
-										className="rounded-md bg-black px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800"
-									>
-										MASTER
-									</button>
-								) : null}
 								<div className="group relative">
 									<button
 										type="button"
@@ -701,9 +809,26 @@ export default function DashboardPage() {
 										</div>
 									</div>
 								</div>
+								{isMasterUser ? (
+									<button
+										type="button"
+										onClick={() => setShowMasterModal(true)}
+										className="rounded-md bg-black px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-800"
+									>
+										MASTER
+									</button>
+								) : null}
 							</div>
-							<img src={getFaceImagePath(selectedFace)} alt="Avatar minifig" className="h-20 w-20 shrink-0 object-contain" />
+							<div className="flex shrink-0 flex-col items-end gap-1">
+								<img src={getFaceImagePath(selectedFace)} alt="Avatar minifig" className="h-20 w-20 object-contain" />
+							</div>
 						</div>
+						{hasSocialProfile ? (
+							<p className="mt-0.5 inline-flex items-center gap-1 text-sm text-slate-700">
+								<SocialIcon platform={socialPlatform === "facebook" ? "facebook" : "instagram"} />
+								<span>@{socialHandle}</span>
+							</p>
+						) : null}
 					</div>
 				</header>
 
@@ -823,11 +948,18 @@ export default function DashboardPage() {
 							</div>
 							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
 							<div className="mt-4 flex flex-col items-center gap-2">
+								<button
+									type="button"
+									onClick={() => void openBalugMembersModal()}
+									className="inline-flex h-10 w-[90%] items-center justify-center rounded-lg border border-black bg-black px-4 text-sm font-semibold text-white hover:bg-slate-800"
+								>
+									Intergrantes Balug
+								</button>
 								{showPoolWantedModule ? (
-									<div className="group relative">
+									<div className="group relative flex w-full justify-center">
 										<Link
 											href="/pool"
-											className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+											className="inline-flex h-10 w-[90%] items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
 										>
 											Pool de items deseados
 										</Link>
@@ -837,10 +969,10 @@ export default function DashboardPage() {
 									</div>
 								) : null}
 								{showPoolSaleModule ? (
-									<div className="group relative">
+									<div className="group relative flex w-full justify-center">
 										<Link
 											href="/pool-venta"
-											className="inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+											className="inline-flex h-10 w-[90%] items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-100"
 										>
 											Pool de items a la venta
 										</Link>
@@ -852,7 +984,7 @@ export default function DashboardPage() {
 									<button
 										type="button"
 										disabled
-										className="inline-flex h-10 cursor-not-allowed items-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
+										className="inline-flex h-10 w-[90%] cursor-not-allowed items-center justify-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
 									>
 										Pool de ventas proximamente
 									</button>
@@ -933,6 +1065,100 @@ export default function DashboardPage() {
 									<span>Minifiguras CMF</span>
 									<span>{masterModules.minifiguras ? "Activo" : "Inactivo"}</span>
 								</button>
+								<button
+									type="button"
+									onClick={() => void openMasterUsersModal()}
+									className="flex w-full items-center justify-center rounded-lg border border-black bg-black px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+								>
+									Usuarios
+								</button>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showMasterUsersModal ? (
+					<div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowMasterUsersModal(false)}>
+						<div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Usuarios Registrados ({registeredUsers.length})</h3>
+								<button
+									type="button"
+									onClick={() => setShowMasterUsersModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<div className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+								<div className="mb-2 flex items-center justify-end gap-2">
+									<label htmlFor="master-users-sort" className="text-xs text-slate-600">
+										Ordenar por
+									</label>
+									<select
+										id="master-users-sort"
+										value={masterUsersSort}
+										onChange={(event) => setMasterUsersSort(event.target.value as "created" | "alpha")}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-800"
+									>
+										<option value="created">Por orden de creacion</option>
+										<option value="alpha">Alfabeticamente</option>
+									</select>
+								</div>
+								{loadingRegisteredUsers ? (
+									<p className="text-sm text-slate-600">Cargando usuarios...</p>
+								) : registeredUsers.length === 0 ? (
+									<p className="text-sm text-slate-600">No hay usuarios para mostrar.</p>
+								) : (
+									sortedRegisteredUsers.map((registeredUser) => (
+										<div key={registeredUser.user_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+											<div className="flex items-center justify-between gap-3">
+												<p className="font-semibold text-slate-900">{registeredUser.display_name}</p>
+												<p className="text-right text-sm text-slate-700">{registeredUser.email}</p>
+											</div>
+										</div>
+									))
+								)}
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showBalugMembersModal ? (
+					<div className="fixed inset-0 z-[54] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowBalugMembersModal(false)}>
+						<div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Integrantes BALUG ({balugMembers.length})</h3>
+								<button
+									type="button"
+									onClick={() => setShowBalugMembersModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<div className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+								{loadingBalugMembers ? (
+									<p className="text-sm text-slate-600">Cargando integrantes...</p>
+								) : balugMembers.length === 0 ? (
+									<p className="text-sm text-slate-600">No hay integrantes para mostrar.</p>
+								) : (
+									balugMembers.map((member, index) => (
+										<div key={`${member.display_name}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+											<div className="flex items-center justify-between gap-3">
+												<p className="font-semibold text-slate-900">{member.display_name}</p>
+												<div className="inline-flex items-center gap-1 text-sm text-slate-700">
+													{member.social_platform === "instagram" || member.social_platform === "facebook" ? (
+														<SocialIcon platform={member.social_platform} className="h-5 w-5" />
+													) : null}
+													<span>{member.social_handle ? `@${member.social_handle}` : "-"}</span>
+												</div>
+											</div>
+										</div>
+									))
+								)}
 							</div>
 						</div>
 					</div>
@@ -994,6 +1220,23 @@ export default function DashboardPage() {
 								onChange={(event) => setSettingsEmailInput(event.target.value)}
 								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
 							/>
+							<div className="mt-3 grid grid-cols-[140px_minmax(0,1fr)] gap-2">
+								<select
+									value={settingsSocialPlatform}
+									onChange={(event) => setSettingsSocialPlatform(event.target.value as "instagram" | "facebook" | "")}
+									className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+								>
+									<option value="instagram">Instagram</option>
+									<option value="facebook">Facebook</option>
+								</select>
+								<input
+									type="text"
+									value={settingsSocialHandle}
+									onChange={(event) => setSettingsSocialHandle(event.target.value)}
+									placeholder="usuario"
+									className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+								/>
+							</div>
 							<button
 								type="button"
 								onClick={openPasswordSettings}

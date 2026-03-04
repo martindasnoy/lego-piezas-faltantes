@@ -92,6 +92,12 @@ type CatalogPart = {
 	is_printed: boolean;
 };
 
+type RegisteredUserLookupRow = {
+	user_id: string;
+	display_name: string;
+	email: string;
+};
+
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
@@ -127,11 +133,12 @@ export default function ListDetailPage() {
 	const [reserveQtyByMatchedLot, setReserveQtyByMatchedLot] = useState<Record<string, number>>({});
 	const [reservingMatchLotId, setReservingMatchLotId] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
+	const [currentUserName, setCurrentUserName] = useState("");
+	const [currentUserEmail, setCurrentUserEmail] = useState("");
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
 	const [showImportExportModal, setShowImportExportModal] = useState(false);
-	const [importExportMode, setImportExportMode] = useState<"import" | "export">("import");
+	const [importExportMode, setImportExportMode] = useState<"import" | "export">("export");
 	const [importSource, setImportSource] = useState("");
-	const [exportTarget, setExportTarget] = useState("");
 	const [importRawInput, setImportRawInput] = useState("");
 	const [importExportBusy, setImportExportBusy] = useState(false);
 	const [catalogLoading, setCatalogLoading] = useState(false);
@@ -364,6 +371,33 @@ export default function ListDetailPage() {
 					router.replace("/");
 					return;
 				}
+
+				const possibleNameValues = [
+					user.user_metadata?.display_name,
+					user.user_metadata?.displayName,
+					user.user_metadata?.username,
+					user.user_metadata?.user_name,
+					user.user_metadata?.preferred_username,
+					user.user_metadata?.nick_name,
+					user.user_metadata?.full_name,
+					user.user_metadata?.name,
+				];
+				const metadataName = possibleNameValues.find((value) => typeof value === "string" && value.trim().length > 0);
+				let resolvedUserName = typeof metadataName === "string" ? metadataName.trim() : "";
+
+				if (!resolvedUserName) {
+					const { data: registeredUsers } = await supabase.rpc("get_registered_users_master");
+					const rows = (registeredUsers as RegisteredUserLookupRow[] | null) ?? [];
+					const byId = rows.find((row) => String(row.user_id) === String(user.id));
+					const byEmail = rows.find((row) => String(row.email).trim().toLowerCase() === String(user.email ?? "").trim().toLowerCase());
+					const row = byId ?? byEmail;
+					if (row?.display_name?.trim()) {
+						resolvedUserName = row.display_name.trim();
+					}
+				}
+
+				setCurrentUserName(resolvedUserName);
+				setCurrentUserEmail((user.email ?? "").trim());
 
 				const { data: listData, error: listError } = await supabase
 					.from("lists")
@@ -1140,118 +1174,104 @@ export default function ListDetailPage() {
 		return map;
 	}
 
-	function normalizeColorKey(raw: string | null | undefined) {
-		return (raw ?? "")
-			.replace(/\(chino\)/gi, "")
-			.toLowerCase()
-			.replace(/grey/g, "gray")
-			.replace(/\s+/g, " ")
-			.trim();
-	}
-
-	function getBricklinkColorId(colorName: string | null | undefined) {
-		const normalized = normalizeColorKey(colorName);
-		const explicitId = normalized.match(/^bl\s*(\d+)$/i);
-		if (explicitId) return Number(explicitId[1]);
-
-		const map: Record<string, number> = {
-			"sin color": 0,
-			white: 1,
-			tan: 2,
-			yellow: 3,
-			orange: 4,
-			red: 5,
-			green: 6,
-			blue: 7,
-			"light gray": 9,
-			"dark gray": 10,
-			black: 11,
-			"trans clear": 13,
-			"trans black": 14,
-			"light bluish gray": 86,
-			"dark bluish gray": 85,
-			"bright light orange": 110,
-		};
-
-		if (normalized in map) return map[normalized];
-		return 0;
-	}
-
-	function escapeXml(raw: string) {
-		return raw
+	function escapeHtml(value: string) {
+		return value
 			.replace(/&/g, "&amp;")
 			.replace(/</g, "&lt;")
 			.replace(/>/g, "&gt;")
 			.replace(/\"/g, "&quot;")
-			.replace(/'/g, "&apos;");
+			.replace(/'/g, "&#39;");
 	}
 
-	function downloadTextFile(fileName: string, content: string, mimeType: string) {
-		const blob = new Blob([content], { type: mimeType });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement("a");
-		link.href = url;
-		link.download = fileName;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(url);
-	}
-
-	function buildBricklinkExportBsx() {
-		const lines = [
-			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-			"<BrickStoreXML>",
-			"  <Inventory>",
-		];
-		for (const lot of lots) {
-			lines.push("    <Item>");
-			lines.push("      <ItemTypeID>P</ItemTypeID>");
-			lines.push(`      <ItemID>${escapeXml(lot.part_num)}</ItemID>`);
-			lines.push(`      <ColorID>${getBricklinkColorId(lot.color_name)}</ColorID>`);
-			lines.push(`      <Qty>${Math.max(1, Number(lot.quantity || 1))}</Qty>`);
-			lines.push("      <Condition>N</Condition>");
-			lines.push("      <Status>I</Status>");
-			lines.push("      <Price>-1.0000</Price>");
-			lines.push("      <Remarks></Remarks>");
-			lines.push("    </Item>");
-		}
-		lines.push("  </Inventory>");
-		lines.push("</BrickStoreXML>");
-		return lines.join("\n");
-	}
-
-	function buildGenericExportCsv() {
-		const header = "part_num,part_name,color_name,quantity,value";
-		const rows = lots.map((lot) => {
-			const values = [lot.part_num, lot.part_name || "", lot.color_name || "", String(lot.quantity || 1), lot.value == null ? "" : String(lot.value)].map((value) => `"${String(value).replace(/\"/g, '""')}"`);
-			return values.join(",");
+	async function openPdfExportPrint() {
+		const title = `${isSaleList ? "Lista de venta" : "Lista de deseo"} ${displayListName}`;
+		const exportDateTime = new Date().toLocaleString("es-AR", {
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit",
 		});
-		return [header, ...rows].join("\n");
+		const exportUserLabel = currentUserName || "Sin nombre";
+		const exportEmailLabel = currentUserEmail || "Sin mail";
+		const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const pdfImagesByKey: PartImageLookup = { ...partImages };
+		const missingImageItems = lots
+			.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name }))
+			.filter((item, index, array) => {
+				const key = getPartImageKey(item.part_num, item.color_name);
+				if (pdfImagesByKey[key] !== undefined) return false;
+				return array.findIndex((candidate) => getPartImageKey(candidate.part_num, candidate.color_name) === key) === index;
+			});
+
+		if (missingImageItems.length > 0) {
+			try {
+				const response = await fetch("/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ items: missingImageItems }),
+				});
+
+				if (response.ok) {
+					const payload = (await response.json()) as {
+						results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
+					};
+					for (const part of payload.results ?? []) {
+						const key = part.key || getPartImageKey(part.part_num, null);
+						pdfImagesByKey[key] = part.part_img_url;
+					}
+				}
+			} catch {}
+		}
+
+		const rowsHtml = lots
+			.map((lot) => {
+				const rawName = (lot.part_name || lot.part_num).trim();
+				const normalizedPartNum = lot.part_num.trim();
+				const cleanedName = rawName
+					.replace(new RegExp(`^#?\\s*${escapeRegex(normalizedPartNum)}\\s*-\\s*`, "i"), "")
+					.trim();
+				const name = escapeHtml(cleanedName || rawName);
+				const colorLabel = escapeHtml(lot.color_name || "Sin color");
+				const colorHex = getColorHexFromName(lot.color_name);
+				const colorText = getTextColorForBackground(colorHex);
+				const qty = Math.max(1, Number(lot.quantity || 1));
+				const imageKey = getPartImageKey(lot.part_num, lot.color_name);
+				const imageUrl = pdfImagesByKey[imageKey];
+				const imageCell = imageUrl
+					? `<img src="${escapeHtml(imageUrl)}" alt="${name}" class="part-image"/>`
+					: `<div class="part-image empty">Sin imagen</div>`;
+				const priceCell = isSaleList ? `<td>${lot.value == null ? "" : `$${escapeHtml(String(lot.value))}`}</td>` : "";
+
+				return `<tr><td>${imageCell}</td><td>${name}</td><td class="color-cell" style="background:${colorHex};color:${colorText};">${colorLabel}</td><td>${qty}</td>${priceCell}</tr>`;
+			})
+			.join("");
+		const priceHeader = isSaleList ? "<th>Precio</th>" : "";
+
+		const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{margin:0 0 16px 0;font-size:22px}.meta{margin:0 0 16px 0;font-size:12px;line-height:1.5}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d1d5db;padding:8px;font-size:12px;text-align:left;vertical-align:middle}th{background:#f3f4f6}.part-image{width:56px;height:56px;object-fit:contain;display:block;margin:0 auto}.part-image.empty{width:56px;height:56px;border:1px dashed #cbd5e1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#64748b;background:#f8fafc}.color-cell{font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body><p class="meta"><strong>Usuario:</strong> ${escapeHtml(exportUserLabel)}<br/><strong>Mail:</strong> ${escapeHtml(exportEmailLabel)}<br/><strong>Fecha:</strong> ${escapeHtml(exportDateTime)}</p><h1>${escapeHtml(title)}</h1><table><thead><tr><th>Imagen</th><th>Nombre</th><th>Color</th><th>Cantidad</th>${priceHeader}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+
+		const popup = window.open("", "_blank", "width=960,height=720");
+		if (!popup) {
+			setMessage("No se pudo abrir la ventana para exportar PDF.");
+			return;
+		}
+
+		popup.document.open();
+		popup.document.write(html);
+		popup.document.close();
+		popup.focus();
+		popup.print();
 	}
 
 	async function handleImportExportAction() {
 		if (importExportMode === "export") {
-			if (!exportTarget) {
-				setMessage("Selecciona destino para exportar.");
-				return;
-			}
-
 			if (lots.length === 0) {
 				setMessage("No hay items para exportar en esta lista.");
 				return;
 			}
 
-			const safeName = (list?.name ?? "lista").trim().replace(/[^a-zA-Z0-9-_]+/g, "_") || "lista";
-			if (exportTarget === "Bricklink") {
-				const xml = buildBricklinkExportBsx();
-				downloadTextFile(`${safeName}_bricklink.bsx`, xml, "application/xml;charset=utf-8");
-				setMessage("Archivo Bricklink (.bsx) exportado.");
-			} else {
-				const csv = buildGenericExportCsv();
-				downloadTextFile(`${safeName}_${exportTarget.toLowerCase().replace(/\s+/g, "_")}.csv`, csv, "text/csv;charset=utf-8");
-				setMessage(`Archivo exportado para ${exportTarget}.`);
-			}
+			await openPdfExportPrint();
+			setMessage("Exportacion PDF lista para imprimir/guardar.");
 			return;
 		}
 
@@ -1687,6 +1707,17 @@ export default function ListDetailPage() {
 				</section>
 				) : null}
 
+				<button
+					type="button"
+					onClick={() => {
+						setImportExportMode("export");
+						setShowImportExportModal(true);
+					}}
+					className="w-full rounded-xl border border-[#006eb2] bg-[#006eb2] px-4 py-3 text-sm font-semibold text-white hover:bg-[#005f9a]"
+				>
+					Exportar
+				</button>
+
 				<section className="rounded-xl border border-slate-200 p-4 sm:p-5">
 					{lots.length === 0 ? (
 						<p className="mt-3 text-sm text-slate-600">Todavia no agregaste lotes.</p>
@@ -2095,22 +2126,7 @@ export default function ListDetailPage() {
 							onClick={(event) => event.stopPropagation()}
 						>
 							<div className="flex items-center justify-between gap-2">
-								<div className="flex items-center gap-2">
-									<button
-										type="button"
-										onClick={() => setImportExportMode("import")}
-										className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${importExportMode === "import" ? "border-[#006eb2] bg-[#006eb2] text-white" : "border-slate-300 bg-white text-slate-700"}`}
-									>
-										Importar
-									</button>
-									<button
-										type="button"
-										onClick={() => setImportExportMode("export")}
-										className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${importExportMode === "export" ? "border-[#006eb2] bg-[#006eb2] text-white" : "border-slate-300 bg-white text-slate-700"}`}
-									>
-										Exportar
-									</button>
-								</div>
+							<h3 className="text-xl font-semibold text-slate-900">Exportar lista</h3>
 								<button
 									type="button"
 									onClick={() => setShowImportExportModal(false)}
@@ -2155,24 +2171,7 @@ export default function ListDetailPage() {
 										{`${isSaleList ? "Lista de ventas" : "Lista de deseos"} ${displayListName}`}
 									</div>
 								) : (
-									<div className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-										<div className="flex items-center justify-between gap-2">
-											<select
-												value={exportTarget}
-												onChange={(event) => setExportTarget(event.target.value)}
-												className="w-full bg-transparent text-sm text-slate-700 outline-none"
-											>
-												<option value="" disabled>
-													Seleccionar una opcion
-												</option>
-												{importExportSites.map((site) => (
-													<option key={site} value={site}>
-														{site}
-													</option>
-												))}
-											</select>
-										</div>
-									</div>
+									<div className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">PDF</div>
 								)}
 
 								{importExportMode === "import" && importSource === "Bricklink" ? (
@@ -2191,7 +2190,7 @@ export default function ListDetailPage() {
 								disabled={importExportBusy}
 								className="mt-4 w-full rounded-md border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
 							>
-								{importExportBusy ? "Procesando..." : importExportMode === "import" ? "Importar" : "Exportar"}
+								{importExportBusy ? "Procesando..." : "Exportar"}
 							</button>
 						</div>
 					</div>

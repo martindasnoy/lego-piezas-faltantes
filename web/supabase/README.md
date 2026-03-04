@@ -24,6 +24,10 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
    - Crea flags globales de modulos y permisos para que solo `martindasnoy@gmail.com` pueda editarlos desde MASTER.
 11. `matches_owner_rpc.sql`
    - Crea RPC para detectar matches entre listas de deseo y listas de venta de otros usuarios (misma pieza + color).
+12. `registered_users_master_rpc.sql`
+   - Crea RPC para que el panel MASTER pueda listar usuarios registrados (nombre y email).
+13. `balug_members_public_rpc.sql`
+   - Crea RPC para mostrar integrantes BALUG (nombre + red social) en dashboard.
 
 ## Verificacion rapida
 
