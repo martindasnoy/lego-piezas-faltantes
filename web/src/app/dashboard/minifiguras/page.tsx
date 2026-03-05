@@ -9,6 +9,7 @@ import { canAccessModule } from "@/lib/feature-flags";
 
 const MINIFIGURAS_THEME_IDS_KEY = "minifiguras_theme_ids";
 const MINIFIGURAS_FAVORITE_THEME_IDS_KEY = "minifiguras_favorite_theme_ids";
+const MINIFIGURAS_FAVORITE_FIGURES_KEY = "minifiguras_favorite_figures";
 const MINIFIGURAS_OWNED_KEY = "minifiguras_owned";
 const MINIFIGURAS_PARTS_UNCHECKED_KEY = "minifiguras_parts_unchecked";
 const MINIFIGURAS_MISSING_PARTS_KEY = "minifiguras_missing_parts";
@@ -189,6 +190,8 @@ export default function MinifigurasPage() {
 	const [partsCheckedByKey, setPartsCheckedByKey] = useState<Record<string, boolean>>({});
 	const [missingPartsByFigureKey, setMissingPartsByFigureKey] = useState<Record<string, MissingPartEntry[]>>({});
 	const [ownedByFigureKey, setOwnedByFigureKey] = useState<Record<string, boolean>>({});
+	const [favoriteByFigureKey, setFavoriteByFigureKey] = useState<Record<string, boolean>>({});
+	const [showOnlyFavoriteFigures, setShowOnlyFavoriteFigures] = useState(false);
 	const userMetadataRef = useRef<Record<string, unknown>>({});
 	const partsUncheckedRef = useRef<Record<string, string[]>>({});
 	const missingPartsRef = useRef<Record<string, MissingPartEntry[]>>({});
@@ -286,6 +289,15 @@ export default function MinifigurasPage() {
 						if (value === true) nextOwned[key] = true;
 					}
 					setOwnedByFigureKey(nextOwned);
+				}
+
+				const favoriteFiguresRaw = metadata[MINIFIGURAS_FAVORITE_FIGURES_KEY];
+				if (favoriteFiguresRaw && typeof favoriteFiguresRaw === "object" && !Array.isArray(favoriteFiguresRaw)) {
+					const nextFavorites: Record<string, boolean> = {};
+					for (const [key, value] of Object.entries(favoriteFiguresRaw)) {
+						if (value === true) nextFavorites[key] = true;
+					}
+					setFavoriteByFigureKey(nextFavorites);
 				}
 
 				const partsUncheckedRaw = metadata[MINIFIGURAS_PARTS_UNCHECKED_KEY];
@@ -509,6 +521,31 @@ export default function MinifigurasPage() {
 		}
 	}
 
+	async function saveFavoriteFiguresMap(nextFavoriteMap: Record<string, boolean>) {
+		try {
+			const supabase = getSupabaseClient();
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+
+			if (!user) return;
+
+			const baseMetadata = {
+				...((user.user_metadata ?? {}) as Record<string, unknown>),
+				...userMetadataRef.current,
+			};
+
+			const nextMetadata = {
+				...baseMetadata,
+				[MINIFIGURAS_FAVORITE_FIGURES_KEY]: nextFavoriteMap,
+			};
+			userMetadataRef.current = nextMetadata;
+
+			const { data } = await supabase.auth.updateUser({ data: nextMetadata });
+			userMetadataRef.current = (data.user?.user_metadata ?? nextMetadata) as Record<string, unknown>;
+		} catch {}
+	}
+
 	function toggleOwned(themeId: number, figureName: string) {
 		const figureKey = getFigureKey(themeId, figureName);
 		setOwnedByFigureKey((current) => {
@@ -519,6 +556,20 @@ export default function MinifigurasPage() {
 				next[figureKey] = true;
 			}
 			void saveOwnedMap(next);
+			return next;
+		});
+	}
+
+	function toggleFavoriteFigure(themeId: number, figureName: string) {
+		const figureKey = getFigureKey(themeId, figureName);
+		setFavoriteByFigureKey((current) => {
+			const next = { ...current };
+			if (next[figureKey]) {
+				delete next[figureKey];
+			} else {
+				next[figureKey] = true;
+			}
+			void saveFavoriteFiguresMap(next);
 			return next;
 		});
 	}
@@ -858,6 +909,7 @@ export default function MinifigurasPage() {
 				...baseMetadata,
 				[MINIFIGURAS_THEME_IDS_KEY]: [],
 				[MINIFIGURAS_FAVORITE_THEME_IDS_KEY]: [],
+				[MINIFIGURAS_FAVORITE_FIGURES_KEY]: {},
 				[MINIFIGURAS_OWNED_KEY]: {},
 				[MINIFIGURAS_PARTS_UNCHECKED_KEY]: {},
 				[MINIFIGURAS_MISSING_PARTS_KEY]: {},
@@ -879,6 +931,7 @@ export default function MinifigurasPage() {
 			setSelectedThemeIds([]);
 			setFavoriteThemeIds([]);
 			setOwnedByFigureKey({});
+			setFavoriteByFigureKey({});
 			setMissingPartsByFigureKey({});
 			setPartsCheckedByKey({});
 			setPartsRows([]);
@@ -887,6 +940,7 @@ export default function MinifigurasPage() {
 			setExpandedThemeIds([]);
 			setSearchInput("");
 			setShowOnlyFavoriteThemes(false);
+			setShowOnlyFavoriteFigures(false);
 			setViewMode("all");
 			setMissingSeriesFilterThemeId(null);
 			setShowFilterModal(false);
@@ -995,6 +1049,7 @@ export default function MinifigurasPage() {
 	const ownedFigureKeys = Object.entries(ownedByFigureKey)
 		.filter(([, isOwned]) => isOwned)
 		.map(([figureKey]) => figureKey);
+	const favoriteTotal = Object.values(favoriteByFigureKey).filter(Boolean).length;
 	const ownedTotal = ownedFigureKeys.length;
 	const ownedWithMissing = ownedFigureKeys.filter((figureKey) => (missingPartsByFigureKey[figureKey]?.length ?? 0) > 0).length;
 	const ownedComplete = Math.max(0, ownedTotal - ownedWithMissing);
@@ -1011,6 +1066,9 @@ export default function MinifigurasPage() {
 	const visibleCards = baseCards.filter((figure) => {
 		const isOwned = ownedByFigureKey[figure.figureKey] === true;
 		const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
+		const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
+
+		if (showOnlyFavoriteFigures && !isFavoriteFigure) return false;
 
 		if (missingSeriesFilterThemeId !== null) {
 			if (figure.themeId !== missingSeriesFilterThemeId) return false;
@@ -1046,23 +1104,17 @@ export default function MinifigurasPage() {
 				<div className="border-b border-slate-200 pb-4">
 					<div className="flex items-center justify-between gap-3">
 						<h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Minifiguras</h1>
-						<div className="flex flex-col items-end gap-2">
+						<div className="flex items-center">
 							<Link href="/dashboard" className="text-sm text-slate-600 hover:underline">
 								← Volver
 							</Link>
-							<button
-								type="button"
-								onClick={() => setShowResetConfirmModal(true)}
-								className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
-							>
-								Reset
-							</button>
 						</div>
 					</div>
 					<div className="mt-2 space-y-1 text-xs text-slate-700">
 						<p>Completas: {ownedComplete}</p>
 						<p>Con faltantes: {ownedWithMissing}</p>
 						<p>Total: {ownedTotal}</p>
+						<p>Favoritas: {favoriteTotal}</p>
 					</div>
 					<div className="mt-2 flex items-center gap-2">
 						<button
@@ -1102,6 +1154,13 @@ export default function MinifigurasPage() {
 						>
 							Solo completas
 						</button>
+						<button
+							type="button"
+							onClick={() => setShowOnlyFavoriteFigures((current) => !current)}
+							className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${showOnlyFavoriteFigures ? "border-rose-600 bg-rose-600 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`}
+						>
+							Favoritas
+						</button>
 						{missingSeriesFilterThemeId !== null ? (
 							<button
 								type="button"
@@ -1124,6 +1183,7 @@ export default function MinifigurasPage() {
 							<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-4">
 								{visibleCards.map((figure) => {
 									const isOwned = ownedByFigureKey[figure.figureKey] === true;
+									const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
 									const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
 									const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
 									return (
@@ -1137,10 +1197,27 @@ export default function MinifigurasPage() {
 														: "border-slate-200 bg-white"
 											}`}
 										>
-											<div className="aspect-square overflow-hidden rounded-md bg-slate-100">
-												{figure.imageUrl ? (
-													<button type="button" onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)} className="block h-full w-full" title="Ver imagen ampliada">
-														<img src={figure.imageUrl} alt={figure.name} loading="lazy" className="h-full w-full object-contain" />
+									<div className="relative aspect-square overflow-hidden rounded-md bg-slate-100">
+										<button
+											type="button"
+											onClick={() => toggleFavoriteFigure(figure.themeId, figure.name)}
+											className="absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow"
+											title={isFavoriteFigure ? "Quitar favorita" : "Marcar favorita"}
+										>
+											<svg
+												viewBox="0 0 24 24"
+												className={`h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`}
+												fill={isFavoriteFigure ? "currentColor" : "none"}
+												stroke="currentColor"
+												strokeWidth="1.7"
+												aria-hidden="true"
+											>
+												<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+											</svg>
+										</button>
+										{figure.imageUrl ? (
+											<button type="button" onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)} className="block h-full w-full" title="Ver imagen ampliada">
+												<img src={figure.imageUrl} alt={figure.name} loading="lazy" className="h-full w-full object-contain" />
 													</button>
 												) : (
 													<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
@@ -1173,10 +1250,11 @@ export default function MinifigurasPage() {
 						<p className="text-sm text-slate-700">Cargando minifiguras seleccionadas...</p>
 					) : (
 						<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-4">
-							{visibleCards.map((figure) => {
-								const isOwned = ownedByFigureKey[figure.figureKey] === true;
-								const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
-								const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
+						{visibleCards.map((figure) => {
+							const isOwned = ownedByFigureKey[figure.figureKey] === true;
+							const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
+							const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
+							const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
 								return (
 								<article
 									key={`${figure.themeId}:${figure.name}`}
@@ -1188,7 +1266,24 @@ export default function MinifigurasPage() {
 												: "border-slate-200 bg-white"
 									}`}
 								>
-									<div className="aspect-square overflow-hidden rounded-md bg-slate-100">
+									<div className="relative aspect-square overflow-hidden rounded-md bg-slate-100">
+										<button
+											type="button"
+											onClick={() => toggleFavoriteFigure(figure.themeId, figure.name)}
+											className="absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow"
+											title={isFavoriteFigure ? "Quitar favorita" : "Marcar favorita"}
+										>
+											<svg
+												viewBox="0 0 24 24"
+												className={`h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`}
+												fill={isFavoriteFigure ? "currentColor" : "none"}
+												stroke="currentColor"
+												strokeWidth="1.7"
+												aria-hidden="true"
+											>
+												<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+											</svg>
+										</button>
 										{figure.imageUrl ? (
 											<button
 												type="button"
@@ -1233,6 +1328,16 @@ export default function MinifigurasPage() {
 							})}
 						</div>
 					)}
+				</div>
+
+				<div className="mt-6 flex justify-end">
+					<button
+						type="button"
+						onClick={() => setShowResetConfirmModal(true)}
+						className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+					>
+						Reset
+					</button>
 				</div>
 			</main>
 
