@@ -1282,7 +1282,7 @@ export default function ListDetailPage() {
 				const imageUrl = pdfImagesByKey[imageKey];
 				const imageCell = imageUrl
 					? `<img src="${escapeHtml(imageUrl)}" alt="${name}" class="part-image"/>`
-					: `<div class="part-image empty">Sin imagen</div>`;
+					: `<div class="part-image empty">Imagen sin cache</div>`;
 				const priceCell = isSaleList ? `<td>${lot.value == null ? "" : `$${escapeHtml(String(lot.value))}`}</td>` : "";
 
 				return `<tr><td>${imageCell}</td><td>${name}</td><td class="color-cell" style="background:${colorHex};color:${colorText};">${colorLabel}</td><td>${qty}</td>${priceCell}</tr>`;
@@ -1815,7 +1815,7 @@ export default function ListDetailPage() {
 											) : (
 												<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
 													<span className="leading-none">IMG</span>
-													<span className="leading-none">Sin imagen</span>
+														<span className="leading-none">Imagen sin cache</span>
 												</div>
 											)}
 											{matchesByLot[String(lot.id)] ? (

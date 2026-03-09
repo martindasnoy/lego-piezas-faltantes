@@ -1508,7 +1508,7 @@ export default function MinifigurasPage() {
 												{part.part_img_url ? (
 													<img src={part.part_img_url} alt={part.name} loading="lazy" className="h-full w-full object-contain" />
 												) : (
-													<div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">Sin imagen</div>
+													<div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">Imagen sin cache</div>
 												)}
 											</div>
 											<div className="min-w-0 flex-1">

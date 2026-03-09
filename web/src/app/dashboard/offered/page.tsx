@@ -249,7 +249,7 @@ export default function OfferedPage() {
 														) : (
 															<div className="flex h-12 w-12 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[8px] text-slate-500">
 																<span className="leading-none">IMG</span>
-																<span className="leading-none">Sin imagen</span>
+													<span className="leading-none">Imagen sin cache</span>
 															</div>
 														)}
 														<div className="min-w-0">

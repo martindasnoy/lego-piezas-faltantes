@@ -1,29 +1,15 @@
 import { NextResponse } from "next/server";
-import { getRuntimeEnvValue } from "@/lib/runtime-env";
 import { getCachedPartColors, getCatalogKvBinding } from "@/lib/rebrickable-catalog-cache";
 
-const REBRICKABLE_PARTS_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const MAX_ITEMS = 200;
-const CHUNK_SIZE = 80;
 
 type ImageRequestItem = {
 	part_num: string;
 	color_name?: string | null;
 };
 
-type RebrickablePart = {
-	part_num: string;
-	part_img_url?: string | null;
-};
-
-type RebrickablePartsPayload = {
-	results?: RebrickablePart[];
-};
-
 const imageCacheByKey = new Map<string, string | null>();
 const imageCacheByPartNum = new Map<string, string | null>();
-const cooldownUntilByPartNum = new Map<string, number>();
-const IMAGE_COOLDOWN_MS = 5000;
 
 function getImageKey(partNum: string, colorName: string | null | undefined) {
 	const normalizedColor = (colorName ?? "").toLowerCase().trim();
@@ -79,47 +65,6 @@ function pickBestColorImage(
 	return null;
 }
 
-function getRebrickableHeaders(apiKey: string) {
-	return {
-		Accept: "application/json",
-		Authorization: `key ${apiKey}`,
-		"User-Agent": "lego-piezas-faltantes/1.0",
-	};
-}
-
-async function fetchPartImageBatch(partNums: string[], apiKey: string) {
-	if (partNums.length === 0) return new Map<string, string | null>();
-
-	const url = new URL(REBRICKABLE_PARTS_API_BASE);
-	url.searchParams.set("part_nums", partNums.join(","));
-	url.searchParams.set("inc_part_details", "1");
-	url.searchParams.set("page_size", String(partNums.length));
-	url.searchParams.set("key", apiKey);
-
-	const response = await fetch(url.toString(), {
-		headers: getRebrickableHeaders(apiKey),
-		next: { revalidate: 60 * 60 * 24 },
-	});
-
-	if (!response.ok) {
-		throw new Error(String(response.status));
-	}
-
-	const payload = (await response.json()) as RebrickablePartsPayload;
-	const byPart = new Map<string, string | null>();
-	for (const part of payload.results ?? []) {
-		byPart.set(part.part_num.toUpperCase(), part.part_img_url ?? null);
-	}
-
-	for (const partNum of partNums) {
-		if (!byPart.has(partNum)) {
-			byPart.set(partNum, null);
-		}
-	}
-
-	return byPart;
-}
-
 export async function POST(request: Request) {
 	let body: { items?: ImageRequestItem[] };
 	try {
@@ -140,9 +85,8 @@ export async function POST(request: Request) {
 		return NextResponse.json({ results: [] });
 	}
 
-	const now = Date.now();
 	const kv = getCatalogKvBinding();
-	const missingPartNums = new Set<string>();
+	const pendingWithoutCache = new Set<string>();
 	for (const item of items) {
 		const key = getImageKey(item.part_num, item.color_name);
 		if (imageCacheByKey.has(key)) continue;
@@ -158,42 +102,12 @@ export async function POST(request: Request) {
 		}
 
 		if (imageCacheByPartNum.has(item.part_num)) continue;
-		const cooldownUntil = cooldownUntilByPartNum.get(item.part_num) ?? 0;
-		if (now < cooldownUntil) continue;
-		missingPartNums.add(item.part_num);
+		pendingWithoutCache.add(item.part_num);
 	}
 
-	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
-	if (!apiKey) {
-		for (const partNum of missingPartNums) {
-			if (!imageCacheByPartNum.has(partNum)) {
-				imageCacheByPartNum.set(partNum, null);
-			}
-		}
-	}
-
-	if (missingPartNums.size > 0 && apiKey) {
-		const pending = [...missingPartNums];
-		for (let index = 0; index < pending.length; index += CHUNK_SIZE) {
-			const chunk = pending.slice(index, index + CHUNK_SIZE);
-			try {
-				const byPart = await fetchPartImageBatch(chunk, apiKey);
-				for (const [partNum, imageUrl] of byPart.entries()) {
-					imageCacheByPartNum.set(partNum, imageUrl);
-				}
-			} catch (error) {
-				const code = error instanceof Error ? error.message : "";
-				if (code === "429") {
-					for (const partNum of chunk) {
-						cooldownUntilByPartNum.set(partNum, Date.now() + IMAGE_COOLDOWN_MS);
-					}
-				}
-				for (const partNum of chunk) {
-					if (!imageCacheByPartNum.has(partNum)) {
-						imageCacheByPartNum.set(partNum, null);
-					}
-				}
-			}
+	for (const partNum of pendingWithoutCache) {
+		if (!imageCacheByPartNum.has(partNum)) {
+			imageCacheByPartNum.set(partNum, null);
 		}
 	}
 

@@ -486,7 +486,7 @@ export default function PoolPage() {
 										) : (
 											<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
 												<span className="leading-none">IMG</span>
-												<span className="leading-none">Sin imagen</span>
+											<span className="leading-none">Imagen sin cache</span>
 											</div>
 										)}
 
