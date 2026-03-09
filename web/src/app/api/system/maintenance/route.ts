@@ -66,6 +66,16 @@ export async function POST(request: Request) {
 		return NextResponse.json({ active: payload.active, message: payload.message, local: true });
 	}
 
-	await kv.put(MAINTENANCE_KEY, JSON.stringify(payload));
-	return NextResponse.json({ active: payload.active, message: payload.message });
+	try {
+		await kv.put(MAINTENANCE_KEY, JSON.stringify(payload));
+		return NextResponse.json({ active: payload.active, message: payload.message });
+	} catch {
+		localMaintenanceState = payload;
+		return NextResponse.json({
+			active: payload.active,
+			message: payload.message,
+			local: true,
+			warning: "No se pudo guardar en KV. Se aplico modo local temporal.",
+		});
+	}
 }

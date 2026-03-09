@@ -373,7 +373,7 @@ export default function DashboardPage() {
 				body: JSON.stringify({ active: nextActive, message: maintenanceText }),
 			});
 
-			const payload = (await response.json()) as { active?: boolean; message?: string; error?: string };
+			const payload = (await response.json()) as { active?: boolean; message?: string; error?: string; warning?: string };
 			if (!response.ok) {
 				setMessage(payload.error ?? "No se pudo actualizar mantenimiento.");
 				return;
@@ -381,7 +381,7 @@ export default function DashboardPage() {
 
 			setMaintenanceActive(Boolean(payload.active));
 			setMaintenanceText(String(payload.message ?? ""));
-			setMessage(nextActive ? "Mantenimiento activado." : "Mantenimiento desactivado.");
+			setMessage(payload.warning ?? (nextActive ? "Mantenimiento activado." : "Mantenimiento desactivado."));
 		} catch {
 			setMessage("No se pudo actualizar mantenimiento.");
 		} finally {
