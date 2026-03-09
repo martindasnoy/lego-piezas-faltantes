@@ -15,6 +15,21 @@ type RebrickablePartsPayload = {
 	results?: RebrickablePart[];
 };
 
+type CategoryPartsResponse = {
+	results: Array<{
+		part_num: string;
+		name: string;
+		part_img_url: string | null;
+		is_printed: boolean;
+	}>;
+	page: number;
+	total_pages: number;
+	has_next: boolean;
+	has_previous: boolean;
+};
+
+const staleCategoryPartsCache = new Map<string, CategoryPartsResponse>();
+
 function getRebrickableHeaders(apiKey: string) {
 	return {
 		Accept: "application/json",
@@ -68,6 +83,7 @@ export async function GET(request: Request) {
 	const pageSize = Math.max(1, Math.min(100, Number(searchParams.get("page_size") ?? "20") || 20));
 	const includePrinted = (searchParams.get("include_printed") ?? "true") !== "false";
 	const includeNonPrinted = (searchParams.get("include_non_printed") ?? "true") !== "false";
+	const cacheKey = `${categoryId}:${page}:${pageSize}:${includePrinted ? 1 : 0}:${includeNonPrinted ? 1 : 0}`;
 
 	if (!categoryId) {
 		return NextResponse.json({ error: "Falta category_id." }, { status: 400 });
@@ -108,16 +124,31 @@ export async function GET(request: Request) {
 		const count = Number(payload.count ?? 0);
 		const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
-		return NextResponse.json({
+		const responsePayload: CategoryPartsResponse = {
 			results,
 			page,
 			total_pages: totalPages,
 			has_next: page < totalPages,
 			has_previous: page > 1,
+		};
+
+		staleCategoryPartsCache.set(cacheKey, responsePayload);
+
+		return NextResponse.json(responsePayload, {
+			headers: {
+				"cache-control": "public, s-maxage=3600, stale-while-revalidate=86400",
+			},
 		});
 	} catch (error) {
 		const code = error instanceof Error ? error.message : "";
 		if (code === "429") {
+			const stale = staleCategoryPartsCache.get(cacheKey);
+			if (stale) {
+				return NextResponse.json(
+					{ ...stale, warning: "Mostrando cache local por limite temporal de Rebrickable." },
+					{ headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=300" } },
+				);
+			}
 			return NextResponse.json({ error: "Limite temporal de Rebrickable. Reintenta en unos segundos." }, { status: 429 });
 		}
 		const detail = code ? ` (${code})` : "";
