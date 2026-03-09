@@ -10,6 +10,49 @@ type RebrickablePart = {
 	print_of?: string | null;
 };
 
+function getRebrickableHeaders(apiKey: string) {
+	return {
+		Accept: "application/json",
+		Authorization: `key ${apiKey}`,
+		"User-Agent": "lego-piezas-faltantes/1.0",
+	};
+}
+
+function extractJsonObject(text: string) {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end <= start) {
+		throw new Error("json-extract-failed");
+	}
+	return JSON.parse(text.slice(start, end + 1)) as unknown;
+}
+
+async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> {
+	const direct = await fetch(url, {
+		headers: getRebrickableHeaders(apiKey),
+	});
+
+	if (direct.ok) {
+		return (await direct.json()) as T;
+	}
+
+	if (direct.status !== 403) {
+		throw new Error(String(direct.status));
+	}
+
+	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
+	const proxied = await fetch(proxyUrl, {
+		headers: { Accept: "text/plain" },
+	});
+
+	if (!proxied.ok) {
+		throw new Error(String(proxied.status));
+	}
+
+	const text = await proxied.text();
+	return extractJsonObject(text) as T;
+}
+
 export type CachedCategoryPart = {
 	part_num: string;
 	name: string;
@@ -53,16 +96,8 @@ async function fetchRebrickablePage(categoryId: string, apiKey: string, page: nu
 	url.searchParams.set("inc_part_details", "1");
 	url.searchParams.set("key", apiKey);
 
-	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
-	});
-
-	if (!response.ok) {
-		throw new Error(String(response.status));
-	}
-
-	return (await response.json()) as {
+	return fetchRebrickableJson<{
 		count?: number;
 		results?: RebrickablePart[];
-	};
+	}>(url.toString(), apiKey);
 }

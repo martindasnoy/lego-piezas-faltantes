@@ -9,6 +9,51 @@ type RebrickablePart = {
 	part_img_url?: string | null;
 };
 
+function getRebrickableHeaders(apiKey: string) {
+	return {
+		Accept: "application/json",
+		Authorization: `key ${apiKey}`,
+		"User-Agent": "lego-piezas-faltantes/1.0",
+	};
+}
+
+function extractJsonObject(text: string) {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end <= start) {
+		throw new Error("json-extract-failed");
+	}
+	return JSON.parse(text.slice(start, end + 1)) as unknown;
+}
+
+async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> {
+	const direct = await fetch(url, {
+		headers: getRebrickableHeaders(apiKey),
+		next: { revalidate: 60 },
+	});
+
+	if (direct.ok) {
+		return (await direct.json()) as T;
+	}
+
+	if (direct.status !== 403) {
+		throw new Error(String(direct.status));
+	}
+
+	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
+	const proxied = await fetch(proxyUrl, {
+		headers: { Accept: "text/plain" },
+		next: { revalidate: 60 },
+	});
+
+	if (!proxied.ok) {
+		throw new Error(String(proxied.status));
+	}
+
+	const text = await proxied.text();
+	return extractJsonObject(text) as T;
+}
+
 export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const rawNums = (searchParams.get("nums") ?? "").trim();
@@ -39,17 +84,7 @@ export async function GET(request: Request) {
 	url.searchParams.set("key", apiKey);
 
 	try {
-		const response = await fetch(url.toString(), {
-			headers: { Accept: "application/json" },
-			next: { revalidate: 60 },
-		});
-
-		if (!response.ok) {
-			const detail = response.status === 429 ? "Limite de Rebrickable alcanzado." : "Error consultando Rebrickable.";
-			return NextResponse.json({ error: detail }, { status: response.status });
-		}
-
-		const payload = (await response.json()) as { results?: RebrickablePart[] };
+		const payload = await fetchRebrickableJson<{ results?: RebrickablePart[] }>(url.toString(), apiKey);
 		const results = (payload.results ?? []).map((part) => ({
 			part_num: part.part_num,
 			name: part.name ?? null,

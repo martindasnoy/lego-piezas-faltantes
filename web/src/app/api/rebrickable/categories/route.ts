@@ -29,8 +29,7 @@ export async function GET() {
 		});
 
 		if (!response.ok) {
-			const detail = response.status === 429 ? "Limite de Rebrickable alcanzado." : "Error consultando Rebrickable.";
-			return NextResponse.json({ error: detail }, { status: response.status });
+			return NextResponse.json({ results: staticRebrickableCategories });
 		}
 
 		const payload = (await response.json()) as { results?: RebrickableCategory[] };
