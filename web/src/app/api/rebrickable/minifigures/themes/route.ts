@@ -11,7 +11,8 @@ export async function GET() {
 	try {
 		const results = await getCachedMinifigureThemes(apiKey);
 		return NextResponse.json({ results });
-	} catch {
-		return NextResponse.json({ error: "No se pudo conectar con Rebrickable." }, { status: 500 });
+	} catch (error) {
+		const detail = error instanceof Error && error.message ? ` (${error.message})` : "";
+		return NextResponse.json({ error: `No se pudo conectar con Rebrickable${detail}.` }, { status: 500 });
 	}
 }

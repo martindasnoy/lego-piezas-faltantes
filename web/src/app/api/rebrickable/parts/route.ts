@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 			const detail =
 				searchResponse.status === 429 || exactResponse.status === 429
 					? "Limite de Rebrickable alcanzado. Intenta en unos segundos."
-					: "Error consultando Rebrickable.";
+					: `Error consultando Rebrickable (${searchResponse.status || exactResponse.status}).`;
 			return NextResponse.json({ error: detail }, { status: searchResponse.status || exactResponse.status });
 		}
 
