@@ -53,6 +53,10 @@ async function fetchSetCountByPartNum(partNum: string, apiKey: string) {
 			signal: controller.signal,
 		});
 
+		if (response.status === 404) {
+			return 0;
+		}
+
 		if (!response.ok) {
 			throw new Error(`${response.status}`);
 		}
