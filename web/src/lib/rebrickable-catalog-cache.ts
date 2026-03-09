@@ -111,7 +111,7 @@ export async function getCachedCategoryAllParts(categoryId: string) {
 
 export async function setCachedCategoryAllParts(categoryId: string, parts: CatalogPart[]) {
 	const kv = getCatalogKv();
-	if (!kv) return;
+	if (!kv) throw new Error("CATALOG_CACHE binding missing");
 	await kv.put(
 		getCacheKey(categoryId),
 		JSON.stringify({
@@ -137,7 +137,7 @@ export async function getCachedPartColors(partNum: string) {
 
 export async function setCachedPartColors(partNum: string, colors: CatalogPartColorVariant[]) {
 	const kv = getCatalogKv();
-	if (!kv) return;
+	if (!kv) throw new Error("CATALOG_CACHE binding missing");
 	await kv.put(
 		getPartColorsCacheKey(partNum),
 		JSON.stringify({

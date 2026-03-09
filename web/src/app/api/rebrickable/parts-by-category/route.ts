@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRuntimeEnvValue } from "@/lib/runtime-env";
 import {
-	fetchAllCategoryPartsFromRebrickable,
 	getCachedCategoryAllParts,
-	setCachedCategoryAllParts,
 	type CatalogPart,
 } from "@/lib/rebrickable-catalog-cache";
 
@@ -69,12 +66,7 @@ export async function GET(request: Request) {
 		}
 
 		if (!allParts) {
-			const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
-			if (!apiKey) {
-				return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
-			}
-			allParts = await fetchAllCategoryPartsFromRebrickable(categoryId, apiKey);
-			await setCachedCategoryAllParts(categoryId, allParts);
+			return NextResponse.json({ error: "Categoria no disponible en cache KV. Ejecuta prewarm para esta categoria." }, { status: 503 });
 		}
 
 		const filtered = allParts.filter((part) => {
