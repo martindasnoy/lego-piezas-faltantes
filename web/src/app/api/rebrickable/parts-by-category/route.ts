@@ -29,6 +29,8 @@ type CategoryPartsResponse = {
 };
 
 const staleCategoryPartsCache = new Map<string, CategoryPartsResponse>();
+const cooldownUntilByCacheKey = new Map<string, number>();
+const CATEGORY_COOLDOWN_MS = 5000;
 
 function getRebrickableHeaders(apiKey: string) {
 	return {
@@ -98,6 +100,18 @@ export async function GET(request: Request) {
 		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
 	}
 
+	const now = Date.now();
+	const cooldownUntil = cooldownUntilByCacheKey.get(cacheKey) ?? 0;
+	if (now < cooldownUntil) {
+		const stale = staleCategoryPartsCache.get(cacheKey);
+		if (stale) {
+			return NextResponse.json(
+				{ ...stale, warning: "Mostrando cache local temporal (cooldown 5s)." },
+				{ headers: { "cache-control": "public, s-maxage=5, stale-while-revalidate=60" } },
+			);
+		}
+	}
+
 	const url = new URL(REBRICKABLE_API_BASE);
 	url.searchParams.set("part_cat_id", categoryId);
 	url.searchParams.set("page", String(page));
@@ -142,6 +156,7 @@ export async function GET(request: Request) {
 	} catch (error) {
 		const code = error instanceof Error ? error.message : "";
 		if (code === "429") {
+			cooldownUntilByCacheKey.set(cacheKey, Date.now() + CATEGORY_COOLDOWN_MS);
 			const stale = staleCategoryPartsCache.get(cacheKey);
 			if (stale) {
 				return NextResponse.json(
