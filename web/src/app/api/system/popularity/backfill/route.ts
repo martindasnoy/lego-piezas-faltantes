@@ -5,6 +5,11 @@ import { getPopularityByPartNums, upsertPopularities } from "@/lib/part-populari
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
 const DEFAULT_BATCH_SIZE = 80;
+const MAX_CONCURRENCY = 6;
+const REQUEST_TIMEOUT_MS = 10000;
+const PART_NUMS_CACHE_TTL_MS = 15 * 60 * 1000;
+
+let cachedCatalogPartNums: { loadedAt: number; partNums: string[] } | null = null;
 
 function getRebrickableHeaders(apiKey: string) {
 	return {
@@ -15,6 +20,11 @@ function getRebrickableHeaders(apiKey: string) {
 }
 
 async function getAllCatalogPartNumsFromKv() {
+	const now = Date.now();
+	if (cachedCatalogPartNums && now - cachedCatalogPartNums.loadedAt < PART_NUMS_CACHE_TTL_MS) {
+		return cachedCatalogPartNums.partNums;
+	}
+
 	const all = new Set<string>();
 	for (const category of staticRebrickableCategories) {
 		const cached = await getCachedCategoryAllParts(String(category.id));
@@ -23,31 +33,76 @@ async function getAllCatalogPartNumsFromKv() {
 			if (partNum) all.add(partNum);
 		}
 	}
-	return [...all].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+
+	const partNums = [...all].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+	cachedCatalogPartNums = { loadedAt: now, partNums };
+	return partNums;
 }
 
 async function fetchSetCountByPartNum(partNum: string, apiKey: string) {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 	const url = new URL(`https://rebrickable.com/api/v3/lego/parts/${encodeURIComponent(partNum)}/sets/`);
 	url.searchParams.set("page_size", "1");
 	url.searchParams.set("key", apiKey);
 
-	const response = await fetch(url.toString(), {
-		headers: getRebrickableHeaders(apiKey),
-		next: { revalidate: 60 * 60 * 24 },
+	try {
+		const response = await fetch(url.toString(), {
+			headers: getRebrickableHeaders(apiKey),
+			next: { revalidate: 60 * 60 * 24 },
+			signal: controller.signal,
+		});
+
+		if (!response.ok) {
+			throw new Error(`${response.status}`);
+		}
+
+		const payload = (await response.json()) as { count?: number };
+		return Number(payload.count ?? 0);
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+async function runBackfillChunk(
+	partNums: string[],
+	apiKey: string,
+	upserts: Array<{ part_num: string; set_count: number }>,
+	errors: Array<{ part_num: string; error: string }>,
+) {
+	let index = 0;
+
+	const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, partNums.length) }, async () => {
+		while (true) {
+			const currentIndex = index;
+			index += 1;
+			if (currentIndex >= partNums.length) return;
+
+			const partNum = partNums[currentIndex];
+			try {
+				const setCount = await fetchSetCountByPartNum(partNum, apiKey);
+				upserts.push({ part_num: partNum, set_count: setCount });
+			} catch (error) {
+				errors.push({
+					part_num: partNum,
+					error: error instanceof Error ? error.message : "error",
+				});
+			}
+		}
 	});
 
-	if (!response.ok) {
-		throw new Error(`${response.status}`);
-	}
+	await Promise.all(workers);
+}
 
-	const payload = (await response.json()) as { count?: number };
-	return Number(payload.count ?? 0);
+function normalizePartNums(raw: unknown): string[] {
+	if (!Array.isArray(raw)) return [];
+	return [...new Set(raw.map((value) => String(value ?? "").trim().toUpperCase()).filter(Boolean))];
 }
 
 export async function POST(request: Request) {
-	let body: { offset?: number; batch_size?: number; force?: boolean } = {};
+	let body: { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown } = {};
 	try {
-		body = (await request.json()) as { offset?: number; batch_size?: number; force?: boolean };
+		body = (await request.json()) as { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown };
 	} catch {
 		body = {};
 	}
@@ -62,6 +117,29 @@ export async function POST(request: Request) {
 	}
 
 	try {
+		const explicitPartNums = normalizePartNums(body.part_nums);
+		if (explicitPartNums.length > 0) {
+			const existing = await getPopularityByPartNums(explicitPartNums);
+			const toProcess = force ? explicitPartNums : explicitPartNums.filter((partNum) => !existing.has(partNum));
+
+			const upserts: Array<{ part_num: string; set_count: number }> = [];
+			const errors: Array<{ part_num: string; error: string }> = [];
+
+			await runBackfillChunk(toProcess, apiKey, upserts, errors);
+			await upsertPopularities(upserts);
+
+			return NextResponse.json({
+				ok: true,
+				mode: "explicit",
+				total: explicitPartNums.length,
+				processed: explicitPartNums.length,
+				upserted: upserts.length,
+				skipped_existing: explicitPartNums.length - toProcess.length,
+				errors: errors.slice(0, 20),
+				done: true,
+			});
+		}
+
 		const allPartNums = await getAllCatalogPartNumsFromKv();
 		const total = allPartNums.length;
 		if (offset >= total) {
@@ -75,17 +153,7 @@ export async function POST(request: Request) {
 		const upserts: Array<{ part_num: string; set_count: number }> = [];
 		const errors: Array<{ part_num: string; error: string }> = [];
 
-		for (const partNum of toProcess) {
-			try {
-				const setCount = await fetchSetCountByPartNum(partNum, apiKey);
-				upserts.push({ part_num: partNum, set_count: setCount });
-			} catch (error) {
-				errors.push({
-					part_num: partNum,
-					error: error instanceof Error ? error.message : "error",
-				});
-			}
-		}
+		await runBackfillChunk(toProcess, apiKey, upserts, errors);
 
 		await upsertPopularities(upserts);
 
