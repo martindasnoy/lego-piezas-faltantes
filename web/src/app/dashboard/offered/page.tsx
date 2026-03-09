@@ -194,8 +194,19 @@ export default function OfferedPage() {
 			}
 		}
 
-		void loadPartImages(rows.map((row) => ({ part_num: row.part_num, color_name: row.color_name })));
-	}, [rows, partImages]);
+		const priorityItems = rows.slice(0, 60).map((row) => ({ part_num: row.part_num, color_name: row.color_name }));
+		const deferredItems = rows.slice(60).map((row) => ({ part_num: row.part_num, color_name: row.color_name }));
+
+		void loadPartImages(priorityItems);
+
+		if (deferredItems.length > 0) {
+			const timeoutId = window.setTimeout(() => {
+				void loadPartImages(deferredItems);
+			}, 250);
+
+			return () => window.clearTimeout(timeoutId);
+		}
+	}, [rows]);
 
 	if (loading) {
 		return (

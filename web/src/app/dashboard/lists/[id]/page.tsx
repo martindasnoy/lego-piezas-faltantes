@@ -257,6 +257,30 @@ export default function ListDetailPage() {
 	}, [lotsPage, totalLotsPages]);
 
 	useEffect(() => {
+		void loadPartImages(
+			paginatedLots.map((lot) => ({
+				part_num: lot.part_num,
+				color_name: lot.color_name,
+			})),
+		);
+	}, [paginatedLots]);
+
+	useEffect(() => {
+		const visibleKeys = new Set(paginatedLots.map((lot) => getPartImageKey(lot.part_num, lot.color_name)));
+		const deferredItems = lots
+			.filter((lot) => !visibleKeys.has(getPartImageKey(lot.part_num, lot.color_name)))
+			.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name }));
+
+		if (deferredItems.length === 0) return;
+
+		const timeoutId = window.setTimeout(() => {
+			void loadPartImages(deferredItems);
+		}, 250);
+
+		return () => window.clearTimeout(timeoutId);
+	}, [lots, paginatedLots]);
+
+	useEffect(() => {
 		if (!activeMatchDetailsSummary) return;
 		setReserveQtyByMatchedLot((current) => {
 			const next = { ...current };
@@ -483,12 +507,6 @@ export default function ListDetailPage() {
 						value: typeof lot.value === "number" ? lot.value : null,
 					}));
 					setLots(loadedLots);
-					void loadPartImages(
-						loadedLots.map((lot) => ({
-							part_num: lot.part_num,
-							color_name: lot.color_name,
-						})),
-					);
 					void loadOffersForLots(loadedLots.map((lot) => String(lot.id)));
 					void loadMatchesForLots(loadedLots.map((lot) => String(lot.id)));
 				}

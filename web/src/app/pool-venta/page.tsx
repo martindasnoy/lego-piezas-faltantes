@@ -181,10 +181,6 @@ export default function PoolVentaPage() {
 		}
 	}
 
-	useEffect(() => {
-		void loadPartImages(publicLots.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name })));
-	}, [publicLots]);
-
 	const lotCards = useMemo<PoolLot[]>(() => {
 		return [...publicLots].sort((a, b) => {
 			if (sortBy === "valor_asc") {
@@ -221,6 +217,25 @@ export default function PoolVentaPage() {
 			setLotsPage(totalLotsPages);
 		}
 	}, [lotsPage, totalLotsPages]);
+
+	useEffect(() => {
+		void loadPartImages(paginatedLotCards.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name })));
+	}, [paginatedLotCards]);
+
+	useEffect(() => {
+		const visibleKeys = new Set(paginatedLotCards.map((lot) => getPartImageKey(lot.part_num, lot.color_name)));
+		const deferredItems = lotCards
+			.filter((lot) => !visibleKeys.has(getPartImageKey(lot.part_num, lot.color_name)))
+			.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name }));
+
+		if (deferredItems.length === 0) return;
+
+		const timeoutId = window.setTimeout(() => {
+			void loadPartImages(deferredItems);
+		}, 250);
+
+		return () => window.clearTimeout(timeoutId);
+	}, [lotCards, paginatedLotCards]);
 
 	useEffect(() => {
 		setLotsPage(1);

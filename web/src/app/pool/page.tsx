@@ -327,15 +327,6 @@ export default function PoolPage() {
 		return brightness > 150 ? "#111827" : "#ffffff";
 	}
 
-	useEffect(() => {
-		void loadPartImages(
-			publicLots.map((lot) => ({
-				part_num: lot.part_num,
-				color_name: lot.color_name,
-			})),
-		);
-	}, [publicLots]);
-
 	const filteredLots = useMemo<PoolLot[]>(() => {
 		return publicLots.filter((lot) => {
 			if (isSaleListName(lot.list_name)) return false;
@@ -378,6 +369,30 @@ export default function PoolPage() {
 	useEffect(() => {
 		setLotsPage(1);
 	}, [sortBy, showPiecesLots, showMinifigurePartsLots]);
+
+	useEffect(() => {
+		void loadPartImages(
+			paginatedLotCards.map((lot) => ({
+				part_num: lot.part_num,
+				color_name: lot.color_name,
+			})),
+		);
+	}, [paginatedLotCards]);
+
+	useEffect(() => {
+		const visibleKeys = new Set(paginatedLotCards.map((lot) => getPartImageKey(lot.part_num, lot.color_name)));
+		const deferredItems = lotCards
+			.filter((lot) => !visibleKeys.has(getPartImageKey(lot.part_num, lot.color_name)))
+			.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name }));
+
+		if (deferredItems.length === 0) return;
+
+		const timeoutId = window.setTimeout(() => {
+			void loadPartImages(deferredItems);
+		}, 250);
+
+		return () => window.clearTimeout(timeoutId);
+	}, [lotCards, paginatedLotCards]);
 
 	if (loading) {
 		return (
