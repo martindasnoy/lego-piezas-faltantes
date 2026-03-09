@@ -64,6 +64,7 @@ export default function PoolPage() {
 	const [showPiecesLots, setShowPiecesLots] = useState(true);
 	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+	const imageRequestAttemptsRef = useRef<Record<string, number>>({});
 
 	function isMinifigurePartsListName(listName: string | null | undefined) {
 		const normalized = String(listName ?? "").trim();
@@ -256,7 +257,12 @@ export default function PoolPage() {
 		}
 
 		const missingItems = [...uniqueByKey.entries()]
-			.filter(([key]) => !(key in partImages) && !imageRequestInFlightRef.current.has(key))
+			.filter(([key]) => {
+				if (imageRequestInFlightRef.current.has(key)) return false;
+				if (!(key in partImages)) return true;
+				if (partImages[key] !== null) return false;
+				return (imageRequestAttemptsRef.current[key] ?? 0) < 3;
+			})
 			.map(([, item]) => item);
 
 		if (missingItems.length === 0) return;
@@ -276,7 +282,12 @@ export default function PoolPage() {
 				if (!response.ok) {
 					setPartImages((current) => {
 						const next = { ...current };
-						for (const key of requestedKeys) next[key] = null;
+						for (const key of requestedKeys) {
+							const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
+							imageRequestAttemptsRef.current[key] = attempts;
+							if (attempts >= 3) next[key] = null;
+							else delete next[key];
+						}
 						return next;
 					});
 					continue;
@@ -286,21 +297,38 @@ export default function PoolPage() {
 					results?: Array<{ key: string; part_num: string; part_img_url: string | null }>;
 				};
 
-				const additions: PartImageLookup = {};
+				const byKey = new Map<string, string | null>();
 				for (const part of payload.results ?? []) {
 					if (!part.key) continue;
-					additions[part.key] = part.part_img_url;
+					byKey.set(part.key, part.part_img_url);
 				}
 
-				for (const key of requestedKeys) {
-					if (!(key in additions)) additions[key] = null;
-				}
+				setPartImages((current) => {
+					const next = { ...current };
+					for (const key of requestedKeys) {
+						const imageUrl = byKey.get(key) ?? null;
+						if (imageUrl) {
+							next[key] = imageUrl;
+							imageRequestAttemptsRef.current[key] = 0;
+							continue;
+						}
 
-				setPartImages((current) => ({ ...current, ...additions }));
+						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
+						imageRequestAttemptsRef.current[key] = attempts;
+						if (attempts >= 3) next[key] = null;
+						else delete next[key];
+					}
+					return next;
+				});
 			} catch {
 				setPartImages((current) => {
 					const next = { ...current };
-					for (const key of requestedKeys) next[key] = null;
+					for (const key of requestedKeys) {
+						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
+						imageRequestAttemptsRef.current[key] = attempts;
+						if (attempts >= 3) next[key] = null;
+						else delete next[key];
+					}
 					return next;
 				});
 			} finally {
@@ -436,20 +464,25 @@ export default function PoolPage() {
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
-										{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
-											<img
-												src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
-												alt={lot.part_name || lot.part_num}
-												loading="lazy"
-												decoding="async"
-												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-											/>
-										) : (
-											<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
-												<span className="leading-none">IMG</span>
-												<span className="leading-none">Sin imagen</span>
-											</div>
-										)}
+									{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
+										<img
+											src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
+											alt={lot.part_name || lot.part_num}
+											loading="lazy"
+											decoding="async"
+											className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
+										/>
+									) : partImages[getPartImageKey(lot.part_num, lot.color_name)] === null ? (
+										<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
+											<span className="leading-none">IMG</span>
+											<span className="leading-none">Sin imagen</span>
+										</div>
+									) : (
+										<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
+											<span className="leading-none">IMG</span>
+											<span className="leading-none">Cargando</span>
+										</div>
+									)}
 
 										<div className="min-w-0 flex-1">
 											<p className="text-sm font-medium text-slate-900">
