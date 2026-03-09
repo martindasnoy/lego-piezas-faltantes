@@ -57,6 +57,14 @@ type ThemeStats = {
 	year: number | null;
 };
 
+function getRebrickableHeaders(apiKey: string) {
+	return {
+		Accept: "application/json",
+		Authorization: `key ${apiKey}`,
+		"User-Agent": "lego-piezas-faltantes/1.0",
+	};
+}
+
 function inferThemeYear(displayName: string) {
 	const seriesMatch = displayName.match(/^Serie\s*(\d+)$/i);
 	if (seriesMatch) {
@@ -194,8 +202,10 @@ function shouldExcludeEntry(name: string) {
 }
 
 async function fetchThemesByUrl(url: string) {
+	const keyMatch = url.match(/[?&]key=([^&]+)/);
+	const apiKey = keyMatch ? decodeURIComponent(keyMatch[1]) : "";
 	const response = await fetch(url, {
-		headers: { Accept: "application/json" },
+		headers: apiKey ? getRebrickableHeaders(apiKey) : { Accept: "application/json" },
 	});
 
 	if (!response.ok) {
@@ -225,7 +235,7 @@ async function fetchThemeStats(themeId: number, apiKey: string): Promise<ThemeSt
 	url.searchParams.set("key", apiKey);
 
 	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
+		headers: getRebrickableHeaders(apiKey),
 	});
 
 	if (!response.ok) return { itemCount: 0, year: null };
@@ -249,7 +259,7 @@ async function fetchMinifiguresByTheme(themeId: number, apiKey: string) {
 	url.searchParams.set("key", apiKey);
 
 	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
+		headers: getRebrickableHeaders(apiKey),
 	});
 
 	if (!response.ok) throw new Error(String(response.status));
@@ -285,7 +295,7 @@ async function fetchMinifigureParts(setNum: string, apiKey: string) {
 	url.searchParams.set("key", apiKey);
 
 	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
+		headers: getRebrickableHeaders(apiKey),
 	});
 
 	if (!response.ok) throw new Error(String(response.status));

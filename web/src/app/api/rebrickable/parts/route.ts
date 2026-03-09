@@ -17,6 +17,14 @@ function getApiKeyCandidates() {
 	return [...new Set(candidates)];
 }
 
+function getRebrickableHeaders(apiKey: string) {
+	return {
+		Accept: "application/json",
+		Authorization: `key ${apiKey}`,
+		"User-Agent": "lego-piezas-faltantes/1.0",
+	};
+}
+
 type RebrickablePart = {
 	part_num: string;
 	name: string;
@@ -57,11 +65,11 @@ export async function GET(request: Request) {
 
 			const [searchTry, exactTry] = await Promise.all([
 				fetch(url.toString(), {
-					headers: { Accept: "application/json" },
+					headers: getRebrickableHeaders(candidateKey),
 					next: { revalidate: 60 },
 				}),
 				fetch(exactPartUrl, {
-					headers: { Accept: "application/json" },
+					headers: getRebrickableHeaders(candidateKey),
 					next: { revalidate: 60 },
 				}),
 			]);
