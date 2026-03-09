@@ -4,6 +4,19 @@ import { getRuntimeEnvValue } from "@/lib/runtime-env";
 const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const fallbackApiKey = "";
 
+function normalizeApiKey(value: string) {
+	const trimmed = value.trim();
+	const token = trimmed.match(/[A-Za-z0-9_-]{20,}/)?.[0] ?? "";
+	return token;
+}
+
+function getApiKeyCandidates() {
+	const candidates = [normalizeApiKey(getRuntimeEnvValue("REBRICKABLE_API_KEY")), normalizeApiKey(process.env.REBRICKABLE_API_KEY ?? ""), normalizeApiKey(fallbackApiKey)].filter(
+		(value) => value.length > 0,
+	);
+	return [...new Set(candidates)];
+}
+
 type RebrickablePart = {
 	part_num: string;
 	name: string;
@@ -14,7 +27,8 @@ export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const rawQuery = (searchParams.get("q") ?? "").trim();
 	const query = rawQuery.trim();
-	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY") || fallbackApiKey;
+	const apiKeys = getApiKeyCandidates();
+	const apiKey = apiKeys[0] ?? "";
 
 	if (!apiKey) {
 		return NextResponse.json(
@@ -27,32 +41,51 @@ export async function GET(request: Request) {
 		return NextResponse.json({ results: [] });
 	}
 
-	const url = new URL(REBRICKABLE_API_BASE);
-	url.searchParams.set("search", query);
-	url.searchParams.set("page_size", "10");
-	url.searchParams.set("inc_part_details", "1");
-	url.searchParams.set("key", apiKey);
-
-	const exactPartUrl = `${REBRICKABLE_API_BASE}${encodeURIComponent(query)}/?key=${encodeURIComponent(apiKey)}`;
-
 	try {
-		const [searchResponse, exactResponse] = await Promise.all([
-			fetch(url.toString(), {
-				headers: { Accept: "application/json" },
-				next: { revalidate: 60 },
-			}),
-			fetch(exactPartUrl, {
-				headers: { Accept: "application/json" },
-				next: { revalidate: 60 },
-			}),
-		]);
+		let searchResponse: Response | null = null;
+		let exactResponse: Response | null = null;
+		let usedKey = "";
+
+		for (const candidateKey of apiKeys) {
+			const url = new URL(REBRICKABLE_API_BASE);
+			url.searchParams.set("search", query);
+			url.searchParams.set("page_size", "10");
+			url.searchParams.set("inc_part_details", "1");
+			url.searchParams.set("key", candidateKey);
+
+			const exactPartUrl = `${REBRICKABLE_API_BASE}${encodeURIComponent(query)}/?key=${encodeURIComponent(candidateKey)}`;
+
+			const [searchTry, exactTry] = await Promise.all([
+				fetch(url.toString(), {
+					headers: { Accept: "application/json" },
+					next: { revalidate: 60 },
+				}),
+				fetch(exactPartUrl, {
+					headers: { Accept: "application/json" },
+					next: { revalidate: 60 },
+				}),
+			]);
+
+			searchResponse = searchTry;
+			exactResponse = exactTry;
+			usedKey = candidateKey;
+
+			if (searchTry.status !== 403 || exactTry.status !== 403) {
+				break;
+			}
+		}
+
+		if (!searchResponse || !exactResponse) {
+			return NextResponse.json({ error: "Error consultando Rebrickable (sin respuesta)." }, { status: 500 });
+		}
 
 		if (!searchResponse.ok && !exactResponse.ok) {
+			const status = searchResponse.status || exactResponse.status;
 			const detail =
-				searchResponse.status === 429 || exactResponse.status === 429
+				status === 429
 					? "Limite de Rebrickable alcanzado. Intenta en unos segundos."
-					: `Error consultando Rebrickable (${searchResponse.status || exactResponse.status}).`;
-			return NextResponse.json({ error: detail }, { status: searchResponse.status || exactResponse.status });
+					: `Error consultando Rebrickable (${status}). key=${usedKey.slice(0, 6)}...`;
+			return NextResponse.json({ error: detail }, { status });
 		}
 
 		let searchResults: RebrickablePart[] = [];
