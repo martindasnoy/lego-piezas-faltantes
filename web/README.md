@@ -50,6 +50,16 @@ npm run deploy
   - `REBRICKABLE_API_KEY`
   - `REBRICKABLE_PREWARM_TOKEN`
 
+### Prewarm de imagenes en R2
+
+- Puedes lanzar un primer barrido de imagenes que ya estan en el pool ejecutando:
+
+```bash
+curl -X POST "https://<tu-dominio>/api/rebrickable/prewarm-images?limit=2500" -H "x-prewarm-token: <REBRICKABLE_PREWARM_TOKEN>"
+```
+
+- El endpoint usa `get_public_pool_lots`, resuelve URLs de imagen y fuerza su carga para que queden guardadas en R2.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
