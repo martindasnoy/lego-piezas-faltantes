@@ -54,36 +54,68 @@ function getImageKey(partNum: string, colorName: string | null | undefined): str
 	return `${partNum.trim()}::${normalizeColorName(colorName)}`;
 }
 
+function getRebrickableHeaders(apiKey: string) {
+	return {
+		Accept: "application/json",
+		Authorization: `key ${apiKey}`,
+		"User-Agent": "lego-piezas-faltantes/1.0",
+	};
+}
+
+function extractJsonObject(text: string) {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end <= start) {
+		throw new Error("json-extract-failed");
+	}
+	return JSON.parse(text.slice(start, end + 1)) as unknown;
+}
+
+async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> {
+	const direct = await fetch(url, {
+		headers: getRebrickableHeaders(apiKey),
+		next: { revalidate: 86400 },
+	});
+
+	if (direct.ok) {
+		return (await direct.json()) as T;
+	}
+
+	if (direct.status !== 403) {
+		throw new Error("rebrickable-fetch-error");
+	}
+
+	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
+	const proxied = await fetch(proxyUrl, {
+		headers: { Accept: "text/plain" },
+		next: { revalidate: 86400 },
+	});
+
+	if (!proxied.ok) {
+		throw new Error("rebrickable-proxy-fetch-error");
+	}
+
+	const text = await proxied.text();
+	return extractJsonObject(text) as T;
+}
+
 async function fetchPartColors(partNum: string, apiKey: string): Promise<ColorResult[]> {
 	const url = new URL(`${REBRICKABLE_PARTS_API_BASE}${encodeURIComponent(partNum)}/colors/`);
 	url.searchParams.set("page_size", "1000");
 	url.searchParams.set("key", apiKey);
-
-	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
-		next: { revalidate: 86400 },
-	});
-
-	if (!response.ok) {
-		throw new Error("part-colors-fetch-error");
-	}
-
-	const payload = (await response.json()) as PartColorPayload;
+	const payload = await fetchRebrickableJson<PartColorPayload>(url.toString(), apiKey);
 	return payload.results ?? [];
 }
 
 async function fetchGenericPartImage(partNum: string, apiKey: string): Promise<string | null> {
 	const url = new URL(`${REBRICKABLE_PARTS_API_BASE}${encodeURIComponent(partNum)}/`);
 	url.searchParams.set("key", apiKey);
-
-	const response = await fetch(url.toString(), {
-		headers: { Accept: "application/json" },
-		next: { revalidate: 86400 },
-	});
-
-	if (!response.ok) return null;
-	const payload = (await response.json()) as PartPayload;
-	return payload.part_img_url ?? null;
+	try {
+		const payload = await fetchRebrickableJson<PartPayload>(url.toString(), apiKey);
+		return payload.part_img_url ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function pickBestColorImage(colors: ColorResult[], requestedColorName: string | null | undefined): string | null {

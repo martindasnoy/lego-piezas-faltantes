@@ -65,6 +65,41 @@ function getRebrickableHeaders(apiKey: string) {
 	};
 }
 
+function extractJsonObject(text: string) {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end <= start) {
+		throw new Error("json-extract-failed");
+	}
+	return JSON.parse(text.slice(start, end + 1)) as unknown;
+}
+
+async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> {
+	const direct = await fetch(url, {
+		headers: getRebrickableHeaders(apiKey),
+	});
+
+	if (direct.ok) {
+		return (await direct.json()) as T;
+	}
+
+	if (direct.status !== 403) {
+		throw new Error(String(direct.status));
+	}
+
+	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
+	const proxied = await fetch(proxyUrl, {
+		headers: { Accept: "text/plain" },
+	});
+
+	if (!proxied.ok) {
+		throw new Error(String(proxied.status));
+	}
+
+	const text = await proxied.text();
+	return extractJsonObject(text) as T;
+}
+
 function inferThemeYear(displayName: string) {
 	const seriesMatch = displayName.match(/^Serie\s*(\d+)$/i);
 	if (seriesMatch) {
@@ -204,15 +239,8 @@ function shouldExcludeEntry(name: string) {
 async function fetchThemesByUrl(url: string) {
 	const keyMatch = url.match(/[?&]key=([^&]+)/);
 	const apiKey = keyMatch ? decodeURIComponent(keyMatch[1]) : "";
-	const response = await fetch(url, {
-		headers: apiKey ? getRebrickableHeaders(apiKey) : { Accept: "application/json" },
-	});
-
-	if (!response.ok) {
-		throw new Error(String(response.status));
-	}
-
-	return (await response.json()) as { results?: RebrickableTheme[]; next?: string | null };
+	if (!apiKey) throw new Error("missing-api-key");
+	return fetchRebrickableJson<{ results?: RebrickableTheme[]; next?: string | null }>(url, apiKey);
 }
 
 async function fetchAllThemes(apiKey: string) {
@@ -234,12 +262,12 @@ async function fetchThemeStats(themeId: number, apiKey: string): Promise<ThemeSt
 	url.searchParams.set("page_size", "500");
 	url.searchParams.set("key", apiKey);
 
-	const response = await fetch(url.toString(), {
-		headers: getRebrickableHeaders(apiKey),
-	});
-
-	if (!response.ok) return { itemCount: 0, year: null };
-	const payload = (await response.json()) as { results?: RebrickableSet[] };
+	let payload: { results?: RebrickableSet[] };
+	try {
+		payload = await fetchRebrickableJson<{ results?: RebrickableSet[] }>(url.toString(), apiKey);
+	} catch {
+		return { itemCount: 0, year: null };
+	}
 	const rows = payload.results ?? [];
 	const names = [...new Set(rows.map((set) => pickMinifigureName(set.name)).filter((name) => name && !shouldExcludeEntry(name)))];
 	const years = rows
@@ -258,13 +286,7 @@ async function fetchMinifiguresByTheme(themeId: number, apiKey: string) {
 	url.searchParams.set("page_size", "500");
 	url.searchParams.set("key", apiKey);
 
-	const response = await fetch(url.toString(), {
-		headers: getRebrickableHeaders(apiKey),
-	});
-
-	if (!response.ok) throw new Error(String(response.status));
-
-	const payload = (await response.json()) as { results?: RebrickableSet[] };
+	const payload = await fetchRebrickableJson<{ results?: RebrickableSet[] }>(url.toString(), apiKey);
 	const byName = new Map<string, CachedMinifigureEntry>();
 
 	for (const set of payload.results ?? []) {
@@ -294,13 +316,7 @@ async function fetchMinifigureParts(setNum: string, apiKey: string) {
 	url.searchParams.set("inc_spares", "1");
 	url.searchParams.set("key", apiKey);
 
-	const response = await fetch(url.toString(), {
-		headers: getRebrickableHeaders(apiKey),
-	});
-
-	if (!response.ok) throw new Error(String(response.status));
-
-	const payload = (await response.json()) as { results?: RebrickableSetPart[] };
+	const payload = await fetchRebrickableJson<{ results?: RebrickableSetPart[] }>(url.toString(), apiKey);
 	return (payload.results ?? [])
 		.filter((item) => item.part?.part_num && item.part?.name)
 		.map((item) => ({
