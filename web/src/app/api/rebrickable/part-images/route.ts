@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
+import { getCachedPartColors } from "@/lib/rebrickable-catalog-cache";
 
 const REBRICKABLE_PARTS_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const MAX_ITEMS = 200;
@@ -27,6 +28,55 @@ const IMAGE_COOLDOWN_MS = 5000;
 function getImageKey(partNum: string, colorName: string | null | undefined) {
 	const normalizedColor = (colorName ?? "").toLowerCase().trim();
 	return `${partNum.trim()}::${normalizedColor}`;
+}
+
+function normalizeColorName(raw: string | null | undefined): string {
+	if (!raw) return "";
+	return raw
+		.toLowerCase()
+		.replace(/grey/g, "gray")
+		.replace(/\(chino\)/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function getColorAliases(normalized: string): string[] {
+	const aliases: Record<string, string[]> = {
+		"light bluish gray": ["medium stone gray"],
+		"medium stone gray": ["light bluish gray"],
+		"dark bluish gray": ["dark stone gray"],
+		"dark stone gray": ["dark bluish gray"],
+	};
+	return aliases[normalized] ?? [];
+}
+
+function pickBestColorImage(
+	colors: Array<{ color_name: string; part_img_url: string | null }>,
+	requestedColorName: string | null | undefined,
+) {
+	if (colors.length === 0) return null;
+	const byName = new Map<string, string | null>();
+	for (const color of colors) {
+		const normalized = normalizeColorName(color.color_name);
+		if (!normalized) continue;
+		if (!byName.has(normalized)) {
+			byName.set(normalized, color.part_img_url ?? null);
+		}
+	}
+
+	const requested = normalizeColorName(requestedColorName);
+	if (requested) {
+		for (const candidate of [requested, ...getColorAliases(requested)]) {
+			const image = byName.get(candidate);
+			if (image) return image;
+		}
+	}
+
+	for (const color of colors) {
+		if (color.part_img_url) return color.part_img_url;
+	}
+
+	return null;
 }
 
 function getRebrickableHeaders(apiKey: string) {
@@ -105,6 +155,17 @@ export async function POST(request: Request) {
 	for (const item of items) {
 		const key = getImageKey(item.part_num, item.color_name);
 		if (imageCacheByKey.has(key)) continue;
+
+		const cachedPartColors = await getCachedPartColors(item.part_num);
+		if (cachedPartColors?.colors?.length) {
+			const picked = pickBestColorImage(cachedPartColors.colors, item.color_name);
+			if (picked) {
+				imageCacheByKey.set(key, picked);
+				imageCacheByPartNum.set(item.part_num, picked);
+				continue;
+			}
+		}
+
 		if (imageCacheByPartNum.has(item.part_num)) continue;
 		const cooldownUntil = cooldownUntilByPartNum.get(item.part_num) ?? 0;
 		if (now < cooldownUntil) continue;

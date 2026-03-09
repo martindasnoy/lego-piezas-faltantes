@@ -10,6 +10,12 @@ export type CatalogPart = {
 	is_printed: boolean;
 };
 
+export type CatalogPartColorVariant = {
+	color_id: number;
+	color_name: string;
+	part_img_url: string | null;
+};
+
 type RebrickablePart = {
 	part_num: string;
 	name?: string;
@@ -23,8 +29,22 @@ type RebrickablePartsPayload = {
 	next?: string | null;
 };
 
+type RebrickablePartColor = {
+	color_id: number;
+	color_name: string;
+	part_img_url?: string | null;
+};
+
+type RebrickablePartColorsPayload = {
+	results?: RebrickablePartColor[];
+};
+
 function getCacheKey(categoryId: string) {
 	return `catalog:${CACHE_VERSION}:category:${categoryId}:all`;
+}
+
+function getPartColorsCacheKey(partNum: string) {
+	return `catalog:${CACHE_VERSION}:part-colors:${partNum.trim().toUpperCase()}`;
 }
 
 function getRebrickableHeaders(apiKey: string) {
@@ -101,6 +121,33 @@ export async function setCachedCategoryAllParts(categoryId: string, parts: Catal
 	);
 }
 
+export async function getCachedPartColors(partNum: string) {
+	const kv = getCatalogKv();
+	if (!kv) return null;
+	const raw = await kv.get(getPartColorsCacheKey(partNum));
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as { updatedAt: string; part_num: string; colors: CatalogPartColorVariant[] };
+		if (!Array.isArray(parsed.colors)) return null;
+		return parsed;
+	} catch {
+		return null;
+	}
+}
+
+export async function setCachedPartColors(partNum: string, colors: CatalogPartColorVariant[]) {
+	const kv = getCatalogKv();
+	if (!kv) return;
+	await kv.put(
+		getPartColorsCacheKey(partNum),
+		JSON.stringify({
+			updatedAt: new Date().toISOString(),
+			part_num: partNum.trim().toUpperCase(),
+			colors,
+		}),
+	);
+}
+
 export async function fetchAllCategoryPartsFromRebrickable(categoryId: string, apiKey: string): Promise<CatalogPart[]> {
 	const url = new URL(REBRICKABLE_API_BASE);
 	url.searchParams.set("part_cat_id", categoryId);
@@ -130,5 +177,18 @@ export async function fetchAllCategoryPartsFromRebrickable(categoryId: string, a
 		name: part.name ?? part.part_num,
 		part_img_url: part.part_img_url ?? null,
 		is_printed: Boolean(part.print_of),
+	}));
+}
+
+export async function fetchPartColorsFromRebrickable(partNum: string, apiKey: string): Promise<CatalogPartColorVariant[]> {
+	const url = new URL(`${REBRICKABLE_API_BASE}${encodeURIComponent(partNum.trim().toUpperCase())}/colors/`);
+	url.searchParams.set("page_size", "1000");
+	url.searchParams.set("key", apiKey);
+
+	const payload = await fetchRebrickableJson<RebrickablePartColorsPayload>(url.toString(), apiKey);
+	return (payload.results ?? []).map((color) => ({
+		color_id: Number(color.color_id ?? 0),
+		color_name: color.color_name ?? "",
+		part_img_url: color.part_img_url ?? null,
 	}));
 }
