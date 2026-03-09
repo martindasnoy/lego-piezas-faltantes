@@ -140,16 +140,6 @@ export async function POST(request: Request) {
 		return NextResponse.json({ results: [] });
 	}
 
-	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
-	if (!apiKey) {
-		const results = items.map((item) => ({
-			key: getImageKey(item.part_num, item.color_name),
-			part_num: item.part_num,
-			part_img_url: null,
-		}));
-		return NextResponse.json({ results });
-	}
-
 	const now = Date.now();
 	const missingPartNums = new Set<string>();
 	for (const item of items) {
@@ -172,7 +162,16 @@ export async function POST(request: Request) {
 		missingPartNums.add(item.part_num);
 	}
 
-	if (missingPartNums.size > 0) {
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
+	if (!apiKey) {
+		for (const partNum of missingPartNums) {
+			if (!imageCacheByPartNum.has(partNum)) {
+				imageCacheByPartNum.set(partNum, null);
+			}
+		}
+	}
+
+	if (missingPartNums.size > 0 && apiKey) {
 		const pending = [...missingPartNums];
 		for (let index = 0; index < pending.length; index += CHUNK_SIZE) {
 			const chunk = pending.slice(index, index + CHUNK_SIZE);
