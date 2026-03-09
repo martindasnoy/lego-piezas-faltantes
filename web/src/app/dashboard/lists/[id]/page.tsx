@@ -156,6 +156,7 @@ export default function ListDetailPage() {
 	const [catalogShowNonPrinted, setCatalogShowNonPrinted] = useState(true);
 	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
+	const catalogPrefetchedKeysRef = useRef<Set<string>>(new Set());
 	const [lotsPage, setLotsPage] = useState(1);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
@@ -945,13 +946,26 @@ export default function ListDetailPage() {
 		setCatalogPartsPage(1);
 		setCatalogPartsTotalPages(1);
 		setCatalogPageInput("1");
-		setCatalogShowPrinted(false);
+		setCatalogShowPrinted(true);
 		setCatalogShowNonPrinted(true);
 		setCatalogPartsError(null);
 		setCatalogError(null);
 		setCatalogFilter("popular");
 
 		if (catalogCategories.length > 0) {
+			const popular = [...catalogCategories]
+				.filter((category) => categoryMatchesFilter(category.id, "popular"))
+				.sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+			const initial = popular[0];
+			if (initial) {
+				const prefetchKey = `${initial.id}:1:1:1`;
+				if (!catalogPrefetchedKeysRef.current.has(prefetchKey)) {
+					catalogPrefetchedKeysRef.current.add(prefetchKey);
+					void fetch(
+						`/api/rebrickable/parts-by-category?category_id=${initial.id}&page=1&page_size=20&include_printed=true&include_non_printed=true`,
+					);
+				}
+			}
 			return;
 		}
 
@@ -968,7 +982,21 @@ export default function ListDetailPage() {
 				return;
 			}
 
-			setCatalogCategories(payload.results ?? []);
+			const categories = payload.results ?? [];
+			setCatalogCategories(categories);
+			const popular = [...categories]
+				.filter((category) => categoryMatchesFilter(category.id, "popular"))
+				.sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+			const initial = popular[0];
+			if (initial) {
+				const prefetchKey = `${initial.id}:1:1:1`;
+				if (!catalogPrefetchedKeysRef.current.has(prefetchKey)) {
+					catalogPrefetchedKeysRef.current.add(prefetchKey);
+					void fetch(
+						`/api/rebrickable/parts-by-category?category_id=${initial.id}&page=1&page_size=20&include_printed=true&include_non_printed=true`,
+					);
+				}
+			}
 		} catch {
 			setCatalogError("No se pudieron cargar categorias.");
 		} finally {
@@ -986,7 +1014,7 @@ export default function ListDetailPage() {
 		setCatalogPartsPage(1);
 		setCatalogPartsTotalPages(1);
 		setCatalogPageInput("1");
-		setCatalogShowPrinted(false);
+		setCatalogShowPrinted(true);
 		setCatalogShowNonPrinted(true);
 	}
 
