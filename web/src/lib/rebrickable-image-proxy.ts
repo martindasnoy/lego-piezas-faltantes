@@ -22,5 +22,5 @@ export function isAllowedRebrickableImageUrl(rawUrl: string) {
 export function toRebrickableImageProxyUrl(rawUrl: string | null | undefined) {
 	if (!rawUrl) return null;
 	if (!isAllowedRebrickableImageUrl(rawUrl)) return null;
-	return rawUrl;
+	return `/api/rebrickable/image?src=${encodeURIComponent(rawUrl)}`;
 }
