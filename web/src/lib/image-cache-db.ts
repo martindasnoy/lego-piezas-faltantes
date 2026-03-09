@@ -93,3 +93,30 @@ export async function listCachedImages(page: number, pageSize: number) {
 		total: Number(count ?? 0),
 	};
 }
+
+export async function getFallbackImagesByPartNums(partNums: string[]) {
+	if (partNums.length === 0) return new Map<string, string>();
+	const uniqueNums = [...new Set(partNums.map((num) => num.trim().toUpperCase()).filter(Boolean))];
+	if (uniqueNums.length === 0) return new Map<string, string>();
+
+	const supabase = getServerSupabaseClient();
+	const { data, error } = await supabase
+		.from("part_image_cache")
+		.select("part_num,part_img_url,updated_at")
+		.in("part_num", uniqueNums)
+		.not("part_img_url", "is", null)
+		.order("updated_at", { ascending: false });
+
+	if (error) throw new Error(error.message);
+
+	const byPart = new Map<string, string>();
+	for (const row of (data ?? []) as Array<{ part_num: string; part_img_url: string | null }>) {
+		const key = row.part_num.trim().toUpperCase();
+		if (!key || !row.part_img_url) continue;
+		if (!byPart.has(key)) {
+			byPart.set(key, row.part_img_url);
+		}
+	}
+
+	return byPart;
+}

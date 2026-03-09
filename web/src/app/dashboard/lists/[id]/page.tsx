@@ -875,9 +875,14 @@ export default function ListDetailPage() {
 
 		try {
 			const supabase = getSupabaseClient();
-			const piece = normalizePartCodeInput(partInput);
-			const partNum = selectedPart?.part_num || piece;
-			const partName = selectedPart?.name || partNum;
+			if (!selectedPart) {
+				setMessage("Selecciona una pieza valida desde el desplegable.");
+				setSaving(false);
+				return;
+			}
+
+			const partNum = selectedPart.part_num;
+			const partName = selectedPart.name || selectedPart.part_num;
 			const isSaleList = isSaleListName(list?.name);
 			const value = parseValueInput(valueInput);
 			const selectedColorName = selectedColor
@@ -890,12 +895,6 @@ export default function ListDetailPage() {
 				? `${selectedColorName}${selectedColor.uniqueFlag ? " (Chino)" : ""}`
 				: colorInput.trim();
 			const quantity = Number(quantityInput);
-
-			if (!partNum) {
-				setMessage("Escribe la pieza para crear el lote.");
-				setSaving(false);
-				return;
-			}
 
 			if (!Number.isFinite(quantity) || quantity <= 0) {
 				setMessage("La cantidad debe ser mayor a 0.");
@@ -1622,6 +1621,9 @@ export default function ListDetailPage() {
 							{loadingSuggestions ? (
 								<p className="mt-1 text-xs text-slate-500">Buscando en el catalogo...</p>
 							) : null}
+							{partInput.trim().length > 0 && !selectedPart ? (
+								<p className="mt-1 text-xs text-amber-700">Elige una pieza del desplegable para poder agregarla.</p>
+							) : null}
 							{suggestions.length > 0 ? (
 								<ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-300 bg-white">
 									{suggestions.map((part) => (
@@ -1756,7 +1758,7 @@ export default function ListDetailPage() {
 								</div>
 								<button
 									type="submit"
-									disabled={saving}
+									disabled={saving || !selectedPart}
 									className="h-11 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
 								>
 									{saving ? "Guardando..." : "Agregar item"}

@@ -43,8 +43,10 @@ export default function PoolVentaPage() {
 	const [loading, setLoading] = useState(true);
 	const [message, setMessage] = useState<string | null>(null);
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
+	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario" | "valor_asc" | "valor_desc">("pieza");
+	const [showOwnLots, setShowOwnLots] = useState(false);
 	const [lotsPage, setLotsPage] = useState(1);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
@@ -68,6 +70,8 @@ export default function PoolVentaPage() {
 					router.replace("/");
 					return;
 				}
+
+				setCurrentUserId(user.id);
 
 				const canAccessPoolSale = await canAccessModule(supabase, user.email, "poolSale");
 				if (!canAccessPoolSale) {
@@ -182,7 +186,12 @@ export default function PoolVentaPage() {
 	}
 
 	const lotCards = useMemo<PoolLot[]>(() => {
-		return [...publicLots].sort((a, b) => {
+		return [...publicLots]
+			.filter((lot) => {
+				if (!showOwnLots && currentUserId && lot.owner_id === currentUserId) return false;
+				return true;
+			})
+			.sort((a, b) => {
 			if (sortBy === "valor_asc") {
 				const aValue = a.value ?? Number.POSITIVE_INFINITY;
 				const bValue = b.value ?? Number.POSITIVE_INFINITY;
@@ -203,7 +212,7 @@ export default function PoolVentaPage() {
 			}
 			return (a.part_name || a.part_num).localeCompare(b.part_name || b.part_num, "es", { sensitivity: "base" });
 		});
-	}, [publicLots, sortBy]);
+	}, [publicLots, sortBy, showOwnLots, currentUserId]);
 
 	const LOTS_PER_PAGE = 40;
 	const totalLotsPages = Math.max(1, Math.ceil(lotCards.length / LOTS_PER_PAGE));
@@ -217,6 +226,10 @@ export default function PoolVentaPage() {
 			setLotsPage(totalLotsPages);
 		}
 	}, [lotsPage, totalLotsPages]);
+
+	useEffect(() => {
+		setLotsPage(1);
+	}, [sortBy, showOwnLots]);
 
 	useEffect(() => {
 		void loadPartImages(paginatedLotCards.map((lot) => ({ part_num: lot.part_num, color_name: lot.color_name })));
@@ -291,6 +304,10 @@ export default function PoolVentaPage() {
 									<option value="valor_asc">De menor a mayor valor</option>
 									<option value="valor_desc">De mayor a menor valor</option>
 								</select>
+								<label className="ml-1 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700">
+									<input type="checkbox" checked={showOwnLots} onChange={(event) => setShowOwnLots(event.target.checked)} />
+									<span>Mostrar items propios</span>
+								</label>
 							</div>
 						</div>
 						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />

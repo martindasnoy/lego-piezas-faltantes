@@ -63,6 +63,7 @@ export default function PoolPage() {
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
 	const [showPiecesLots, setShowPiecesLots] = useState(true);
 	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
+	const [showOwnLots, setShowOwnLots] = useState(false);
 	const [lotsPage, setLotsPage] = useState(1);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
@@ -330,12 +331,13 @@ export default function PoolPage() {
 	const filteredLots = useMemo<PoolLot[]>(() => {
 		return publicLots.filter((lot) => {
 			if (isSaleListName(lot.list_name)) return false;
+			if (!showOwnLots && currentUserId && lot.owner_id === currentUserId) return false;
 			const isMinifigLot = isMinifigurePartsListName(lot.list_name);
 			if (isMinifigLot && !showMinifigurePartsLots) return false;
 			if (!isMinifigLot && !showPiecesLots) return false;
 			return true;
 		});
-	}, [publicLots, showPiecesLots, showMinifigurePartsLots]);
+	}, [publicLots, showPiecesLots, showMinifigurePartsLots, showOwnLots, currentUserId]);
 
 	const lotCards = useMemo<PoolLot[]>(() => {
 		return [...filteredLots]
@@ -368,7 +370,7 @@ export default function PoolPage() {
 
 	useEffect(() => {
 		setLotsPage(1);
-	}, [sortBy, showPiecesLots, showMinifigurePartsLots]);
+	}, [sortBy, showPiecesLots, showMinifigurePartsLots, showOwnLots]);
 
 	useEffect(() => {
 		void loadPartImages(
@@ -451,6 +453,10 @@ export default function PoolPage() {
 								>
 									Partes Minifiguras
 								</button>
+								<label className="ml-1 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700">
+									<input type="checkbox" checked={showOwnLots} onChange={(event) => setShowOwnLots(event.target.checked)} />
+									<span>Mostrar items propios</span>
+								</label>
 							</div>
 						</div>
 						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />

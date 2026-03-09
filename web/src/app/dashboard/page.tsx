@@ -462,6 +462,16 @@ export default function DashboardPage() {
 		return users;
 	}, [registeredUsers, masterUsersSort]);
 
+	function formatCacheDate(value: string) {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return "Fecha desconocida";
+		return date.toLocaleString("es-AR", {
+			year: "2-digit",
+			month: "2-digit",
+			day: "2-digit",
+		});
+	}
+
 	async function createList(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setSaving(true);
@@ -1253,6 +1263,7 @@ export default function DashboardPage() {
 												</div>
 												<p className="mt-1 truncate text-[9px] font-semibold text-slate-800">{row.part_num}</p>
 												<p className="truncate text-[8px] text-slate-500">{row.color_name}</p>
+												<p className="truncate text-[8px] text-slate-400">{formatCacheDate(row.updated_at)}</p>
 											</div>
 										))}
 									</div>
