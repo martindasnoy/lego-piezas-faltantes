@@ -29,6 +29,14 @@ type PartPayload = {
 	part_img_url?: string | null;
 };
 
+type UniqueImageItem = {
+	key: string;
+	part_num: string;
+	color_name: string | null;
+};
+
+const REBRICKABLE_CONCURRENCY = 8;
+
 function normalizeColorName(raw: string | null | undefined): string {
 	if (!raw) return "";
 	const withoutSuffix = raw.replace(/\(chino\)/gi, "");
@@ -152,25 +160,62 @@ export async function POST(request: Request) {
 		}
 	}
 
-	const uniqueItems = [...uniqueByKey.entries()].map(([key, item]) => ({ key, ...item }));
+	const uniqueItems: UniqueImageItem[] = [...uniqueByKey.entries()].map(([key, item]) => ({
+		key,
+		part_num: item.part_num,
+		color_name: item.color_name ?? null,
+	}));
 
-	const results = await Promise.all(
-		uniqueItems.map(async (item) => {
-			try {
-				const colors = await fetchPartColors(item.part_num, apiKey);
-				const picked = pickBestColorImage(colors, item.color_name);
-				if (picked) {
-					return { key: item.key, part_num: item.part_num, part_img_url: picked };
+	const byPartNum = new Map<string, UniqueImageItem[]>();
+	for (const item of uniqueItems) {
+		const key = item.part_num.trim().toUpperCase();
+		const current = byPartNum.get(key) ?? [];
+		current.push(item);
+		byPartNum.set(key, current);
+	}
+
+	const partNums = [...byPartNum.keys()];
+	const partImageByKey = new Map<string, string | null>();
+
+	for (let index = 0; index < partNums.length; index += REBRICKABLE_CONCURRENCY) {
+		const chunk = partNums.slice(index, index + REBRICKABLE_CONCURRENCY);
+
+		await Promise.all(
+			chunk.map(async (partNum) => {
+				const partItems = byPartNum.get(partNum) ?? [];
+				let colors: ColorResult[] = [];
+				try {
+					colors = await fetchPartColors(partNum, apiKey);
+				} catch {
+					colors = [];
 				}
 
-				const generic = await fetchGenericPartImage(item.part_num, apiKey);
-				return { key: item.key, part_num: item.part_num, part_img_url: generic };
-			} catch {
-				const generic = await fetchGenericPartImage(item.part_num, apiKey);
-				return { key: item.key, part_num: item.part_num, part_img_url: generic };
-			}
-		}),
-	);
+				let generic: string | null | undefined;
+				for (const item of partItems) {
+					const picked = colors.length > 0 ? pickBestColorImage(colors, item.color_name) : null;
+					if (picked) {
+						partImageByKey.set(item.key, picked);
+						continue;
+					}
+
+					if (generic === undefined) {
+						try {
+							generic = await fetchGenericPartImage(partNum, apiKey);
+						} catch {
+							generic = null;
+						}
+					}
+					partImageByKey.set(item.key, generic ?? null);
+				}
+			}),
+		);
+	}
+
+	const results = uniqueItems.map((item) => ({
+		key: item.key,
+		part_num: item.part_num,
+		part_img_url: partImageByKey.get(item.key) ?? null,
+	}));
 
 	const proxied = results.map((result) => ({
 		...result,
