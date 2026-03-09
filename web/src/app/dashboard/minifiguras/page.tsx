@@ -1191,8 +1191,8 @@ export default function MinifigurasPage() {
 		const imagePreviewParts = shouldShowMissingCountTile ? missingPreview.slice(0, 2) : missingPreview;
 		const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
 		const imageContainerClass = hasMissingPieces
-			? "relative h-[160px] overflow-hidden rounded-md bg-slate-100"
-			: "relative aspect-square overflow-hidden rounded-md bg-slate-100";
+			? "relative h-[160px] overflow-hidden rounded-md bg-white"
+			: "relative aspect-square overflow-hidden rounded-md bg-white";
 		const favoriteButtonClass = hasMissingPieces
 			? "absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow"
 			: "absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow";
@@ -1251,7 +1251,7 @@ export default function MinifigurasPage() {
 							const partKey = getPartImageKey(part.part_num, part.color_name);
 							const partImageUrl = missingPartImages[partKey] ?? null;
 							return (
-								<div key={`${figure.figureKey}:${part.part_num}:${part.color_name ?? "sin-color"}:${index}`} className="overflow-hidden rounded border border-slate-300 bg-white/80">
+								<div key={`${figure.figureKey}:${part.part_num}:${part.color_name ?? "sin-color"}:${index}`} className="overflow-hidden rounded border border-slate-300 bg-white">
 									{partImageUrl ? (
 										<button
 											type="button"
@@ -1268,7 +1268,7 @@ export default function MinifigurasPage() {
 							);
 						})}
 						{shouldShowMissingCountTile ? (
-							<div className="flex h-9 w-full flex-col items-center justify-center rounded border border-slate-300 bg-white/80 px-1 text-center text-slate-700">
+							<div className="flex h-9 w-full flex-col items-center justify-center rounded border border-slate-300 bg-white px-1 text-center text-slate-700">
 								<span className="text-sm font-bold leading-none">{totalMissingCount}</span>
 								<span className="text-[7px] font-semibold uppercase tracking-wide leading-none">faltantes</span>
 							</div>
