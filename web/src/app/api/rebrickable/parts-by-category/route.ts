@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+	getCatalogKvBinding,
 	getCachedCategoryAllParts,
 	type CatalogPart,
 } from "@/lib/rebrickable-catalog-cache";
@@ -59,8 +60,9 @@ export async function GET(request: Request) {
 	}
 
 	try {
+		const kv = getCatalogKvBinding();
 		let allParts: CatalogPart[] | null = null;
-		const cached = await getCachedCategoryAllParts(categoryId);
+		const cached = await getCachedCategoryAllParts(categoryId, kv);
 		if (cached?.parts?.length) {
 			allParts = cached.parts;
 		}

@@ -84,7 +84,7 @@ async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> 
 	return extractJsonObject(text) as T;
 }
 
-function getCatalogKv(): KVNamespace | null {
+export function getCatalogKvBinding(): KVNamespace | null {
 	try {
 		const env = getCloudflareContext()?.env as Record<string, unknown> | undefined;
 		const kv = env?.CATALOG_CACHE;
@@ -95,8 +95,8 @@ function getCatalogKv(): KVNamespace | null {
 	}
 }
 
-export async function getCachedCategoryAllParts(categoryId: string) {
-	const kv = getCatalogKv();
+export async function getCachedCategoryAllParts(categoryId: string, kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
 	if (!kv) return null;
 	const raw = await kv.get(getCacheKey(categoryId));
 	if (!raw) return null;
@@ -109,8 +109,8 @@ export async function getCachedCategoryAllParts(categoryId: string) {
 	}
 }
 
-export async function setCachedCategoryAllParts(categoryId: string, parts: CatalogPart[]) {
-	const kv = getCatalogKv();
+export async function setCachedCategoryAllParts(categoryId: string, parts: CatalogPart[], kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
 	if (!kv) throw new Error("CATALOG_CACHE binding missing");
 	await kv.put(
 		getCacheKey(categoryId),
@@ -121,8 +121,8 @@ export async function setCachedCategoryAllParts(categoryId: string, parts: Catal
 	);
 }
 
-export async function getCachedPartColors(partNum: string) {
-	const kv = getCatalogKv();
+export async function getCachedPartColors(partNum: string, kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
 	if (!kv) return null;
 	const raw = await kv.get(getPartColorsCacheKey(partNum));
 	if (!raw) return null;
@@ -135,8 +135,8 @@ export async function getCachedPartColors(partNum: string) {
 	}
 }
 
-export async function setCachedPartColors(partNum: string, colors: CatalogPartColorVariant[]) {
-	const kv = getCatalogKv();
+export async function setCachedPartColors(partNum: string, colors: CatalogPartColorVariant[], kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
 	if (!kv) throw new Error("CATALOG_CACHE binding missing");
 	await kv.put(
 		getPartColorsCacheKey(partNum),

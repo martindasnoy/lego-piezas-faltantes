@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
-import { getCachedPartColors } from "@/lib/rebrickable-catalog-cache";
+import { getCachedPartColors, getCatalogKvBinding } from "@/lib/rebrickable-catalog-cache";
 
 const REBRICKABLE_PARTS_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
 const MAX_ITEMS = 200;
@@ -141,12 +141,13 @@ export async function POST(request: Request) {
 	}
 
 	const now = Date.now();
+	const kv = getCatalogKvBinding();
 	const missingPartNums = new Set<string>();
 	for (const item of items) {
 		const key = getImageKey(item.part_num, item.color_name);
 		if (imageCacheByKey.has(key)) continue;
 
-		const cachedPartColors = await getCachedPartColors(item.part_num);
+		const cachedPartColors = await getCachedPartColors(item.part_num, kv);
 		if (cachedPartColors?.colors?.length) {
 			const picked = pickBestColorImage(cachedPartColors.colors, item.color_name);
 			if (picked) {

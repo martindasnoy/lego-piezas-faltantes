@@ -3,6 +3,7 @@ import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static
 import {
 	fetchAllCategoryPartsFromRebrickable,
 	fetchPartColorsFromRebrickable,
+	getCatalogKvBinding,
 	getCachedPartColors,
 	setCachedCategoryAllParts,
 	setCachedPartColors,
@@ -51,12 +52,17 @@ export async function POST(request: Request) {
 	const maxColors = Math.max(1, Math.min(80, Number(searchParams.get("max_colors") ?? "35") || 35));
 
 	try {
+		const kv = getCatalogKvBinding();
+		if (!kv) {
+			return NextResponse.json({ error: "CATALOG_CACHE binding missing." }, { status: 500 });
+		}
+
 		if (all) {
 			const stats: Array<{ category_id: number; parts: number; ok: boolean; error?: string }> = [];
 			for (const category of staticRebrickableCategories) {
 				try {
 					const parts = await fetchAllCategoryPartsFromRebrickable(String(category.id), apiKey);
-					await setCachedCategoryAllParts(String(category.id), parts);
+					await setCachedCategoryAllParts(String(category.id), parts, kv);
 					stats.push({ category_id: category.id, parts: parts.length, ok: true });
 				} catch (error) {
 					stats.push({
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
 		}
 
 		const parts = await fetchAllCategoryPartsFromRebrickable(categoryId, apiKey);
-		await setCachedCategoryAllParts(categoryId, parts);
+		await setCachedCategoryAllParts(categoryId, parts, kv);
 
 		if (!includeColors) {
 			return NextResponse.json({ ok: true, category_id: categoryId, parts: parts.length, colors_warmed: 0 });
@@ -98,7 +104,7 @@ export async function POST(request: Request) {
 			}
 
 			const part = parts[index];
-			const existing = await getCachedPartColors(part.part_num);
+			const existing = await getCachedPartColors(part.part_num, kv);
 			if (existing?.colors && existing.colors.length > 0) {
 				colorsSkipped += 1;
 				continue;
@@ -106,7 +112,7 @@ export async function POST(request: Request) {
 
 			try {
 				const colors = await fetchPartColorsFromRebrickable(part.part_num, apiKey);
-				await setCachedPartColors(part.part_num, colors);
+				await setCachedPartColors(part.part_num, colors, kv);
 				colorsWarmed += 1;
 				colorsProcessed += 1;
 			} catch (error) {
