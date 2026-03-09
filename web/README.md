@@ -41,9 +41,6 @@ npm run deploy
 
 - Do not commit secrets in `wrangler.toml`.
 - Keep `REBRICKABLE_API_KEY` and `REBRICKABLE_PREWARM_TOKEN` as Cloudflare Worker secrets.
-- Create R2 buckets for part image cache (see `wrangler.toml`):
-  - `lego-piezas-part-images-cache`
-  - `lego-piezas-part-images-cache-preview`
 - If you deploy from GitHub Actions, set these repository secrets:
   - `CF_API_TOKEN`
   - `CF_ACCOUNT_ID`

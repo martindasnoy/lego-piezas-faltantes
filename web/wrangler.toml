@@ -9,8 +9,3 @@ binding = "ASSETS"
 
 [vars]
 NEXTJS_ENV = "production"
-
-[[r2_buckets]]
-binding = "PART_IMAGES_CACHE"
-bucket_name = "lego-piezas-part-images-cache"
-preview_bucket_name = "lego-piezas-part-images-cache-preview"
