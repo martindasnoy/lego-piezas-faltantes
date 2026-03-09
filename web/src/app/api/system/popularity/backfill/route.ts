@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
 import { getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
+import { fetchAllCategoryPartsFromRebrickable } from "@/lib/rebrickable-catalog-cache";
 import { getPopularityByPartNums, upsertPopularities } from "@/lib/part-popularity-db";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
@@ -104,9 +105,15 @@ function normalizePartNums(raw: unknown): string[] {
 }
 
 export async function POST(request: Request) {
-	let body: { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown } = {};
+	let body: { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown; category_id?: number | string } = {};
 	try {
-		body = (await request.json()) as { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown };
+		body = (await request.json()) as {
+			offset?: number;
+			batch_size?: number;
+			force?: boolean;
+			part_nums?: unknown;
+			category_id?: number | string;
+		};
 	} catch {
 		body = {};
 	}
@@ -121,6 +128,44 @@ export async function POST(request: Request) {
 	}
 
 	try {
+		const categoryId = String(body.category_id ?? "").trim();
+		if (categoryId) {
+			const parts = await fetchAllCategoryPartsFromRebrickable(categoryId, apiKey);
+			const allPartNums = [...new Set(parts.map((part) => String(part.part_num ?? "").trim().toUpperCase()).filter(Boolean))].sort((a, b) =>
+				a.localeCompare(b, "en", { sensitivity: "base" }),
+			);
+
+			const total = allPartNums.length;
+			if (offset >= total) {
+				return NextResponse.json({ ok: true, mode: "category", category_id: categoryId, total, processed: 0, next_offset: null, done: true });
+			}
+
+			const chunk = allPartNums.slice(offset, offset + batchSize);
+			const existing = await getPopularityByPartNums(chunk);
+			const toProcess = force ? chunk : chunk.filter((partNum) => !existing.has(partNum));
+
+			const upserts: Array<{ part_num: string; set_count: number }> = [];
+			const errors: Array<{ part_num: string; error: string }> = [];
+
+			await runBackfillChunk(toProcess, apiKey, upserts, errors);
+			await upsertPopularities(upserts);
+
+			const nextOffset = offset + chunk.length;
+			return NextResponse.json({
+				ok: true,
+				mode: "category",
+				category_id: categoryId,
+				total,
+				offset,
+				processed: chunk.length,
+				upserted: upserts.length,
+				skipped_existing: chunk.length - toProcess.length,
+				errors: errors.slice(0, 20),
+				next_offset: nextOffset < total ? nextOffset : null,
+				done: nextOffset >= total,
+			});
+		}
+
 		const explicitPartNums = normalizePartNums(body.part_nums);
 		if (explicitPartNums.length > 0) {
 			const existing = await getPopularityByPartNums(explicitPartNums);
