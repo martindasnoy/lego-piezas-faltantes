@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import constructorImage from "../../../Imagenes/Constructor.png";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { clearSessionStart, enforceSessionTtl } from "@/lib/session-ttl";
@@ -94,6 +95,13 @@ type UserList = {
 	is_auto_generated: boolean;
 };
 
+type CachedImageRow = {
+	part_num: string;
+	color_name: string;
+	part_img_url: string;
+	updated_at: string;
+};
+
 export default function DashboardPage() {
 	const router = useRouter();
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
@@ -104,6 +112,16 @@ export default function DashboardPage() {
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [showMasterModal, setShowMasterModal] = useState(false);
 	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
+	const [showCacheImagesModal, setShowCacheImagesModal] = useState(false);
+	const [cacheImages, setCacheImages] = useState<CachedImageRow[]>([]);
+	const [cacheImagesLoading, setCacheImagesLoading] = useState(false);
+	const [cacheImagesError, setCacheImagesError] = useState<string | null>(null);
+	const [cacheImagesPage, setCacheImagesPage] = useState(1);
+	const [cacheImagesTotalPages, setCacheImagesTotalPages] = useState(1);
+	const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+	const [maintenanceText, setMaintenanceText] = useState("");
+	const [maintenanceActive, setMaintenanceActive] = useState(false);
+	const [maintenanceSaving, setMaintenanceSaving] = useState(false);
 	const [masterModules, setMasterModules] = useState<MasterModules>(DEFAULT_MASTER_MODULES);
 	const [registeredUsers, setRegisteredUsers] = useState<RegisteredUserRow[]>([]);
 	const [loadingRegisteredUsers, setLoadingRegisteredUsers] = useState(false);
@@ -159,6 +177,18 @@ export default function DashboardPage() {
 			poolSale: Boolean(byKey.get(MODULE_DB_KEYS.poolSale)?.enabled ?? true),
 			minifiguras: Boolean(byKey.get(MODULE_DB_KEYS.minifiguras)?.enabled ?? true),
 		});
+	}
+
+	async function loadMaintenanceConfig() {
+		try {
+			const response = await fetch("/api/system/maintenance", { cache: "no-store" });
+			if (!response.ok) return;
+			const payload = (await response.json()) as { active?: boolean; message?: string };
+			setMaintenanceActive(Boolean(payload.active));
+			setMaintenanceText(String(payload.message ?? ""));
+		} catch {
+			// no-op
+		}
 	}
 
 	async function loadLists(ownerId: string) {
@@ -262,6 +292,7 @@ export default function DashboardPage() {
 				const isMaster = normalizedEmail === MASTER_EMAIL;
 				setIsMasterUser(isMaster);
 				await loadMasterModules();
+				await loadMaintenanceConfig();
 
 				setDisplayName((user.user_metadata?.display_name as string) ?? "");
 				const metadataSocialPlatform = String(user.user_metadata?.social_platform ?? "").toLowerCase();
@@ -330,6 +361,34 @@ export default function DashboardPage() {
 		}
 	}
 
+	async function setMaintenanceState(nextActive: boolean) {
+		if (!isMasterUser) return;
+		setMaintenanceSaving(true);
+		setMessage(null);
+
+		try {
+			const response = await fetch("/api/system/maintenance", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ active: nextActive, message: maintenanceText }),
+			});
+
+			const payload = (await response.json()) as { active?: boolean; message?: string; error?: string };
+			if (!response.ok) {
+				setMessage(payload.error ?? "No se pudo actualizar mantenimiento.");
+				return;
+			}
+
+			setMaintenanceActive(Boolean(payload.active));
+			setMaintenanceText(String(payload.message ?? ""));
+			setMessage(nextActive ? "Mantenimiento activado." : "Mantenimiento desactivado.");
+		} catch {
+			setMessage("No se pudo actualizar mantenimiento.");
+		} finally {
+			setMaintenanceSaving(false);
+		}
+	}
+
 	async function openBalugMembersModal() {
 		setShowBalugMembersModal(true);
 		setLoadingBalugMembers(true);
@@ -350,6 +409,40 @@ export default function DashboardPage() {
 			setLoadingBalugMembers(false);
 		}
 	}
+
+	async function loadCacheImages(page: number) {
+		setCacheImagesLoading(true);
+		setCacheImagesError(null);
+		try {
+			const response = await fetch(`/api/system/cache-images?page=${page}&page_size=60`, { cache: "no-store" });
+			const payload = (await response.json()) as {
+				results?: CachedImageRow[];
+				page?: number;
+				total_pages?: number;
+				error?: string;
+			};
+
+			if (!response.ok) {
+				setCacheImagesError(payload.error ?? "No se pudo cargar el cache de imagenes.");
+				setCacheImages([]);
+				return;
+			}
+
+			setCacheImages(payload.results ?? []);
+			setCacheImagesPage(Number(payload.page ?? page));
+			setCacheImagesTotalPages(Number(payload.total_pages ?? 1));
+		} catch {
+			setCacheImagesError("No se pudo cargar el cache de imagenes.");
+			setCacheImages([]);
+		} finally {
+			setCacheImagesLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		if (!showCacheImagesModal) return;
+		void loadCacheImages(cacheImagesPage);
+	}, [showCacheImagesModal, cacheImagesPage]);
 
 	const sortedRegisteredUsers = useMemo(() => {
 		const users = [...registeredUsers];
@@ -772,6 +865,19 @@ export default function DashboardPage() {
 		);
 	}
 
+	if (!isMasterUser && maintenanceActive) {
+		return (
+			<div className="bg-lego-tile flex min-h-screen items-center justify-center px-6">
+				<div className="mx-auto w-full max-w-3xl text-center text-white">
+					<div className="flex justify-center">
+						<Image src={constructorImage} alt="Constructor" className="h-40 w-40 object-contain sm:h-52 sm:w-52" />
+					</div>
+					<p className="mt-5 whitespace-pre-line text-lg sm:text-2xl">{maintenanceText || "Estamos realizando tareas de mantenimiento."}</p>
+				</div>
+			</div>
+		);
+	}
+
 	const showPoolWantedModule = isMasterUser || masterModules.poolWanted;
 	const showPoolSaleModule = isMasterUser || masterModules.poolSale;
 	const showMinifigurasModule = isMasterUser || masterModules.minifiguras;
@@ -1040,38 +1146,160 @@ export default function DashboardPage() {
 								</button>
 							</div>
 							<p className="mt-2 text-xs text-slate-600">Activa o desactiva modulos del dashboard.</p>
-							<div className="mt-4 space-y-2">
+							<div className="mt-4 space-y-3">
 								<button
 									type="button"
-									onClick={() => toggleMasterModule("poolWanted")}
-									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolWanted ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+									onClick={() => setShowMaintenanceModal(true)}
+									className="flex w-full items-center justify-center rounded-lg border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
 								>
-									<span>Pool de items deseados</span>
-									<span>{masterModules.poolWanted ? "Activo" : "Inactivo"}</span>
+									Mantenimiento
+								</button>
+
+								<div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+									<p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Modulos</p>
+									<div className="space-y-2">
+										<button
+											type="button"
+											onClick={() => toggleMasterModule("poolWanted")}
+											className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolWanted ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+										>
+											<span>Pool de items deseados</span>
+											<span>{masterModules.poolWanted ? "Activo" : "Inactivo"}</span>
+										</button>
+										<button
+											type="button"
+											onClick={() => toggleMasterModule("poolSale")}
+											className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolSale ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+										>
+											<span>Pool de items a la venta</span>
+											<span>{masterModules.poolSale ? "Activo" : "Inactivo"}</span>
+										</button>
+										<button
+											type="button"
+											onClick={() => toggleMasterModule("minifiguras")}
+											className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.minifiguras ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+										>
+											<span>Minifiguras CMF</span>
+											<span>{masterModules.minifiguras ? "Activo" : "Inactivo"}</span>
+										</button>
+									</div>
+								</div>
+
+								<div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+									<p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Info</p>
+									<div className="space-y-2">
+										<button
+											type="button"
+											onClick={() => void openMasterUsersModal()}
+											className="flex w-full items-center justify-center rounded-lg border border-black bg-black px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+										>
+											Usuarios
+										</button>
+										<button
+											type="button"
+											onClick={() => setShowCacheImagesModal(true)}
+											className="flex w-full items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
+										>
+											Cache imagenes
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showCacheImagesModal ? (
+					<div className="fixed inset-0 z-[56] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowCacheImagesModal(false)}>
+						<div className="h-[82vh] w-full max-w-5xl rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Cache imagenes</h3>
+								<div className="flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => setCacheImagesPage((current) => Math.max(1, current - 1))}
+										disabled={cacheImagesLoading || cacheImagesPage <= 1}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										Anterior
+									</button>
+									<span className="text-xs text-slate-600">Pagina {cacheImagesPage} de {cacheImagesTotalPages}</span>
+									<button
+										type="button"
+										onClick={() => setCacheImagesPage((current) => Math.min(cacheImagesTotalPages, current + 1))}
+										disabled={cacheImagesLoading || cacheImagesPage >= cacheImagesTotalPages}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+									>
+										Siguiente
+									</button>
+									<button
+										type="button"
+										onClick={() => setShowCacheImagesModal(false)}
+										className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+									>
+										Cerrar
+									</button>
+								</div>
+							</div>
+							<div className="mt-4 h-[calc(82vh-84px)] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+								{cacheImagesLoading ? <p className="text-sm text-slate-600">Cargando imagenes cacheadas...</p> : null}
+								{cacheImagesError ? <p className="text-sm text-red-700">{cacheImagesError}</p> : null}
+								{!cacheImagesLoading && !cacheImagesError ? (
+									<div className="grid grid-cols-5 gap-2 md:grid-cols-10">
+										{cacheImages.map((row, index) => (
+											<div key={`${row.part_num}:${row.color_name}:${row.updated_at}:${index}`} className="rounded border border-slate-300 bg-white p-1">
+												<div className="flex h-16 items-center justify-center overflow-hidden rounded bg-slate-100">
+													<img src={row.part_img_url} alt={`${row.part_num} ${row.color_name}`} className="h-full w-full object-contain" loading="lazy" />
+												</div>
+												<p className="mt-1 truncate text-[9px] font-semibold text-slate-800">{row.part_num}</p>
+												<p className="truncate text-[8px] text-slate-500">{row.color_name}</p>
+											</div>
+										))}
+									</div>
+								) : null}
+								{!cacheImagesLoading && !cacheImagesError && cacheImages.length === 0 ? <p className="text-sm text-slate-600">No hay imagenes cacheadas para mostrar.</p> : null}
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showMaintenanceModal ? (
+					<div className="fixed inset-0 z-[57] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowMaintenanceModal(false)}>
+						<div className="h-[82vh] w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<button
+									type="button"
+									onClick={() => void setMaintenanceState(!maintenanceActive)}
+									disabled={maintenanceSaving}
+									className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${maintenanceActive ? "border border-black bg-black hover:bg-slate-800" : "border border-[#006eb2] bg-[#006eb2] hover:bg-[#005f9a]"}`}
+								>
+									{maintenanceActive ? "DESACTIVAR" : "ACTIVAR"}
 								</button>
 								<button
 									type="button"
-									onClick={() => toggleMasterModule("poolSale")}
-									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.poolSale ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
+									onClick={() => setShowMaintenanceModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
 								>
-									<span>Pool de items a la venta</span>
-									<span>{masterModules.poolSale ? "Activo" : "Inactivo"}</span>
+									Cerrar
 								</button>
-								<button
-									type="button"
-									onClick={() => toggleMasterModule("minifiguras")}
-									className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${masterModules.minifiguras ? "border-[#006eb2] bg-[#e8f4fb] text-[#005f9a]" : "border-slate-300 bg-white text-slate-700"}`}
-								>
-									<span>Minifiguras CMF</span>
-									<span>{masterModules.minifiguras ? "Activo" : "Inactivo"}</span>
-								</button>
-								<button
-									type="button"
-									onClick={() => void openMasterUsersModal()}
-									className="flex w-full items-center justify-center rounded-lg border border-black bg-black px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-								>
-									Usuarios
-								</button>
+							</div>
+							<div className="mt-4 h-[calc(82vh-84px)] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+								<textarea
+									value={maintenanceText}
+									onChange={(event) => setMaintenanceText(event.target.value)}
+									placeholder="Escribi el texto de mantenimiento..."
+									rows={5}
+									className="w-full resize-none rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none focus:border-slate-500"
+								/>
+								<div className="mt-4">
+									<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Vista previa</p>
+									<div className="bg-lego-tile mx-auto w-full max-w-md rounded-lg border border-slate-300 px-4 py-6 text-center text-white">
+										<div className="flex justify-center">
+											<Image src={constructorImage} alt="Constructor" className="h-24 w-24 object-contain sm:h-28 sm:w-28" />
+										</div>
+										<p className="mt-3 whitespace-pre-line text-base sm:text-lg">{maintenanceText || "Estamos realizando tareas de mantenimiento."}</p>
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>

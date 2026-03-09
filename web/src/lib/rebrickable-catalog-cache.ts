@@ -16,6 +16,12 @@ export type CatalogPartColorVariant = {
 	part_img_url: string | null;
 };
 
+export type CachedPartColorsMetadata = {
+	updatedAt: string;
+	part_num: string;
+	preview: Array<{ color_name: string; part_img_url: string }>;
+};
+
 type RebrickablePart = {
 	part_num: string;
 	name?: string;
@@ -138,13 +144,26 @@ export async function getCachedPartColors(partNum: string, kvBinding?: KVNamespa
 export async function setCachedPartColors(partNum: string, colors: CatalogPartColorVariant[], kvBinding?: KVNamespace | null) {
 	const kv = kvBinding ?? getCatalogKvBinding();
 	if (!kv) throw new Error("CATALOG_CACHE binding missing");
+	const updatedAt = new Date().toISOString();
+	const normalizedPartNum = partNum.trim().toUpperCase();
+	const preview = colors
+		.filter((row) => Boolean(row.part_img_url))
+		.slice(0, 12)
+		.map((row) => ({ color_name: row.color_name, part_img_url: row.part_img_url as string }));
 	await kv.put(
 		getPartColorsCacheKey(partNum),
 		JSON.stringify({
-			updatedAt: new Date().toISOString(),
-			part_num: partNum.trim().toUpperCase(),
+			updatedAt,
+			part_num: normalizedPartNum,
 			colors,
 		}),
+		{
+			metadata: {
+				updatedAt,
+				part_num: normalizedPartNum,
+				preview,
+			} satisfies CachedPartColorsMetadata,
+		},
 	);
 }
 
