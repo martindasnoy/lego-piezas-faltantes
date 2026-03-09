@@ -152,7 +152,7 @@ export default function ListDetailPage() {
 	const [catalogPartsPage, setCatalogPartsPage] = useState(1);
 	const [catalogPartsTotalPages, setCatalogPartsTotalPages] = useState(1);
 	const [catalogPageInput, setCatalogPageInput] = useState("1");
-	const [catalogShowPrinted, setCatalogShowPrinted] = useState(false);
+	const [catalogShowPrinted, setCatalogShowPrinted] = useState(true);
 	const [catalogShowNonPrinted, setCatalogShowNonPrinted] = useState(true);
 	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
@@ -162,7 +162,7 @@ export default function ListDetailPage() {
 	const importExportSites = [
 		"Lego PAB (pick a brick)",
 		"Bricklink",
-		"Rebricable",
+		"Catalogo",
 		"Brickset",
 		"X1",
 		"X2",
@@ -350,7 +350,7 @@ export default function ListDetailPage() {
 
 				if (!response.ok) {
 					setSuggestions([]);
-					setMessage(payload.error ?? "No se pudo buscar en Rebrickable.");
+					setMessage(payload.error ?? "No se pudo buscar en el catalogo.");
 					return;
 				}
 
@@ -1557,7 +1557,7 @@ export default function ListDetailPage() {
 								Por Catálogo
 							</button>
 							<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
-								Busca en el catalogo de Rebrickable para encontrar tu pieza.
+							Busca en el catalogo para encontrar tu pieza.
 							</div>
 						</div>
 					</div>
@@ -1574,7 +1574,7 @@ export default function ListDetailPage() {
 								className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
 							/>
 							{loadingSuggestions ? (
-								<p className="mt-1 text-xs text-slate-500">Buscando en Rebrickable...</p>
+								<p className="mt-1 text-xs text-slate-500">Buscando en el catalogo...</p>
 							) : null}
 							{suggestions.length > 0 ? (
 								<ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-300 bg-white">

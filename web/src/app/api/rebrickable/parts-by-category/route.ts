@@ -39,6 +39,15 @@ async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> 
 	});
 
 	if (direct.ok) return (await direct.json()) as T;
+	if (direct.status === 429) {
+		const retry = await fetch(url, {
+			headers: getRebrickableHeaders(apiKey),
+			next: { revalidate: 60 * 60 },
+		});
+		if (retry.ok) return (await retry.json()) as T;
+		if (retry.status !== 403 && retry.status !== 429) throw new Error(String(retry.status));
+	}
+
 	if (direct.status !== 403 && direct.status !== 429) throw new Error(String(direct.status));
 
 	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
@@ -109,7 +118,7 @@ export async function GET(request: Request) {
 	} catch (error) {
 		const code = error instanceof Error ? error.message : "";
 		if (code === "429") {
-			return NextResponse.json({ results: [], page, total_pages: 1, has_next: false, has_previous: false, warning: "Rate limit temporal" });
+			return NextResponse.json({ error: "Limite temporal de Rebrickable. Reintenta en unos segundos." }, { status: 429 });
 		}
 		const detail = code ? ` (${code})` : "";
 		return NextResponse.json({ error: `No se pudo cargar piezas de categoria${detail}.` }, { status: 500 });
