@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 import {
 	fetchPartColorsFromRebrickable,
-	getCachedPartColors,
-	getCatalogKvBinding,
-	setCachedPartColors,
 } from "@/lib/rebrickable-catalog-cache";
+import {
+	buildCacheKey,
+	getCachedImagesByKeys,
+	normalizeColorName,
+	upsertCachedImages,
+} from "@/lib/image-cache-db";
 
 const MAX_ITEMS = 200;
 
@@ -18,18 +21,7 @@ const imageCacheByKey = new Map<string, string | null>();
 const imageCacheByPartNum = new Map<string, string | null>();
 
 function getImageKey(partNum: string, colorName: string | null | undefined) {
-	const normalizedColor = (colorName ?? "").toLowerCase().trim();
-	return `${partNum.trim()}::${normalizedColor}`;
-}
-
-function normalizeColorName(raw: string | null | undefined): string {
-	if (!raw) return "";
-	return raw
-		.toLowerCase()
-		.replace(/grey/g, "gray")
-		.replace(/\(chino\)/g, "")
-		.replace(/\s+/g, " ")
-		.trim();
+	return buildCacheKey(partNum, colorName);
 }
 
 function getColorAliases(normalized: string): string[] {
@@ -91,29 +83,37 @@ export async function POST(request: Request) {
 		return NextResponse.json({ results: [] });
 	}
 
-	const kv = getCatalogKvBinding();
 	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 	const partColorsByPartNum = new Map<string, Array<{ color_name: string; part_img_url: string | null }> | null>();
 	const pendingWithoutCache = new Set<string>();
+	const dbUpserts: Array<{
+		cache_key: string;
+		part_num: string;
+		color_name: string;
+		color_name_norm: string;
+		part_img_url: string | null;
+		status: "found" | "missing" | "error";
+	}> = [];
+
+	const keysToQuery = items.map((item) => getImageKey(item.part_num, item.color_name));
+	let dbRowsByKey = new Map<string, { part_img_url: string | null }>();
+	try {
+		dbRowsByKey = await getCachedImagesByKeys(keysToQuery);
+	} catch {
+		dbRowsByKey = new Map();
+	}
 
 	for (const item of items) {
 		const key = getImageKey(item.part_num, item.color_name);
 		if (imageCacheByKey.has(key)) continue;
 
-		let cachedPartColors = partColorsByPartNum.get(item.part_num);
-		if (cachedPartColors === undefined) {
-			const cached = await getCachedPartColors(item.part_num, kv);
-			cachedPartColors = cached?.colors ?? null;
-			partColorsByPartNum.set(item.part_num, cachedPartColors);
-		}
-
-		if (cachedPartColors && cachedPartColors.length > 0) {
-			const picked = pickBestColorImage(cachedPartColors, item.color_name);
-			if (picked) {
-				imageCacheByKey.set(key, picked);
-				imageCacheByPartNum.set(item.part_num, picked);
-				continue;
+		const dbRow = dbRowsByKey.get(key);
+		if (dbRow) {
+			imageCacheByKey.set(key, dbRow.part_img_url ?? null);
+			if (dbRow.part_img_url) {
+				imageCacheByPartNum.set(item.part_num, dbRow.part_img_url);
 			}
+			continue;
 		}
 
 		if (imageCacheByPartNum.has(item.part_num)) continue;
@@ -128,7 +128,6 @@ export async function POST(request: Request) {
 
 		try {
 			const colors = await fetchPartColorsFromRebrickable(partNum, apiKey);
-			await setCachedPartColors(partNum, colors, kv);
 			partColorsByPartNum.set(partNum, colors);
 
 			const picked = pickBestColorImage(colors, null);
@@ -157,13 +156,28 @@ export async function POST(request: Request) {
 		const partColors = partColorsByPartNum.get(item.part_num) ?? null;
 		if (partColors && partColors.length > 0) {
 			const picked = pickBestColorImage(partColors, item.color_name);
-			if (picked) {
-				imageCacheByKey.set(key, picked);
-				return { key, part_num: item.part_num, part_img_url: picked };
-			}
+			const status = picked ? "found" : "missing";
+			dbUpserts.push({
+				cache_key: key,
+				part_num: item.part_num,
+				color_name: item.color_name ?? "",
+				color_name_norm: normalizeColorName(item.color_name),
+				part_img_url: picked ?? null,
+				status,
+			});
+			imageCacheByKey.set(key, picked ?? null);
+			return { key, part_num: item.part_num, part_img_url: picked ?? null };
 		}
 
 		const byPart = imageCacheByPartNum.get(item.part_num) ?? null;
+		dbUpserts.push({
+			cache_key: key,
+			part_num: item.part_num,
+			color_name: item.color_name ?? "",
+			color_name_norm: normalizeColorName(item.color_name),
+			part_img_url: byPart,
+			status: byPart ? "found" : "missing",
+		});
 		imageCacheByKey.set(key, byPart);
 		return {
 			key,
@@ -171,6 +185,14 @@ export async function POST(request: Request) {
 			part_img_url: byPart,
 		};
 	});
+
+	if (dbUpserts.length > 0) {
+		try {
+			await upsertCachedImages(dbUpserts);
+		} catch {
+			// keep response working even if DB write fails
+		}
+	}
 
 	return NextResponse.json({ results });
 }

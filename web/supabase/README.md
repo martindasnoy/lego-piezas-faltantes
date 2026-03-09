@@ -27,7 +27,9 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
 12. `registered_users_master_rpc.sql`
    - Crea RPC para que el panel MASTER pueda listar usuarios registrados (nombre y email).
 13. `balug_members_public_rpc.sql`
-   - Crea RPC para mostrar integrantes BALUG (nombre + red social) en dashboard.
+    - Crea RPC para mostrar integrantes BALUG (nombre + red social) en dashboard.
+14. `part_image_cache.sql`
+    - Crea tabla DB-first para cache de imagenes de piezas (`part_num + color`) con RLS y permisos para API.
 
 ## Verificacion rapida
 
