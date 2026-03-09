@@ -188,7 +188,7 @@ function pickMinifigureName(setName: string) {
 
 function shouldExcludeEntry(name: string) {
 	const normalized = name.trim().toLowerCase();
-	if (/\b(pack|complete|box|bag)\b/.test(normalized)) return true;
+	if (/\b(pack|complete|box|bag|sets?)\b/.test(normalized)) return true;
 	if (/^[0-9]{5,}[a-z0-9]*-[0-9]+$/i.test(normalized)) return true;
 	return false;
 }

@@ -45,6 +45,7 @@ export default function PoolVentaPage() {
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario" | "valor_asc" | "valor_desc">("pieza");
+	const [lotsPage, setLotsPage] = useState(1);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
@@ -208,6 +209,23 @@ export default function PoolVentaPage() {
 		});
 	}, [publicLots, sortBy]);
 
+	const LOTS_PER_PAGE = 40;
+	const totalLotsPages = Math.max(1, Math.ceil(lotCards.length / LOTS_PER_PAGE));
+	const paginatedLotCards = useMemo(() => {
+		const start = (lotsPage - 1) * LOTS_PER_PAGE;
+		return lotCards.slice(start, start + LOTS_PER_PAGE);
+	}, [lotCards, lotsPage]);
+
+	useEffect(() => {
+		if (lotsPage > totalLotsPages) {
+			setLotsPage(totalLotsPages);
+		}
+	}, [lotsPage, totalLotsPages]);
+
+	useEffect(() => {
+		setLotsPage(1);
+	}, [sortBy]);
+
 	function getColorHexFromName(colorName: string | null) {
 		if (!colorName) return "#d1d5db";
 		const normalized = colorName.replace("(Chino)", "").trim().toLowerCase();
@@ -268,7 +286,28 @@ export default function PoolVentaPage() {
 					<section className="rounded-xl border border-slate-200 p-5 text-sm text-slate-600">No hay items publicos a la venta por ahora.</section>
 				) : (
 					<section className="space-y-2">
-						{lotCards.map((lot) => (
+						<div className="mb-2 flex items-center justify-center gap-2 text-xs text-slate-600">
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+								disabled={lotsPage <= 1}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Anterior
+							</button>
+							<span>
+								Pagina {lotsPage} de {totalLotsPages}
+							</span>
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+								disabled={lotsPage >= totalLotsPages}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Siguiente
+							</button>
+						</div>
+						{paginatedLotCards.map((lot) => (
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
@@ -314,6 +353,27 @@ export default function PoolVentaPage() {
 								</div>
 							</article>
 						))}
+						<div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-600">
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+								disabled={lotsPage <= 1}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Anterior
+							</button>
+							<span>
+								Pagina {lotsPage} de {totalLotsPages}
+							</span>
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+								disabled={lotsPage >= totalLotsPages}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Siguiente
+							</button>
+						</div>
 					</section>
 				)}
 

@@ -156,6 +156,7 @@ export default function ListDetailPage() {
 	const [catalogShowNonPrinted, setCatalogShowNonPrinted] = useState(true);
 	const [catalogPartsLoading, setCatalogPartsLoading] = useState(false);
 	const [catalogPartsError, setCatalogPartsError] = useState<string | null>(null);
+	const [lotsPage, setLotsPage] = useState(1);
 	const colorDropdownRef = useRef<HTMLDivElement | null>(null);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 	const importExportSites = [
@@ -240,6 +241,19 @@ export default function ListDetailPage() {
 		if (!matchDetailsLotId) return null;
 		return matchesByLot[matchDetailsLotId] ?? null;
 	}, [matchDetailsLotId, matchesByLot]);
+
+	const LOTS_PER_PAGE = 40;
+	const totalLotsPages = Math.max(1, Math.ceil(lots.length / LOTS_PER_PAGE));
+	const paginatedLots = useMemo(() => {
+		const start = (lotsPage - 1) * LOTS_PER_PAGE;
+		return lots.slice(start, start + LOTS_PER_PAGE);
+	}, [lots, lotsPage]);
+
+	useEffect(() => {
+		if (lotsPage > totalLotsPages) {
+			setLotsPage(totalLotsPages);
+		}
+	}, [lotsPage, totalLotsPages]);
 
 	useEffect(() => {
 		if (!activeMatchDetailsSummary) return;
@@ -1722,8 +1736,30 @@ export default function ListDetailPage() {
 					{lots.length === 0 ? (
 						<p className="mt-3 text-sm text-slate-600">Todavia no agregaste lotes.</p>
 					) : (
-						<ul className="mt-4 space-y-3">
-							{lots.map((lot) => (
+						<>
+							<div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-600">
+								<button
+									type="button"
+									onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+									disabled={lotsPage <= 1}
+									className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+								>
+									Anterior
+								</button>
+								<span>
+									Pagina {lotsPage} de {totalLotsPages}
+								</span>
+								<button
+									type="button"
+									onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+									disabled={lotsPage >= totalLotsPages}
+									className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+								>
+									Siguiente
+								</button>
+							</div>
+							<ul className="mt-3 space-y-3">
+								{paginatedLots.map((lot) => (
 								<li
 									key={lot.id}
 									className={`rounded-lg border px-3 py-2 ${matchesByLot[String(lot.id)] ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}
@@ -1925,8 +1961,30 @@ export default function ListDetailPage() {
 										</div>
 									</div>
 								</li>
-							))}
-						</ul>
+								))}
+							</ul>
+							<div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-600">
+								<button
+									type="button"
+									onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+									disabled={lotsPage <= 1}
+									className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+								>
+									Anterior
+								</button>
+								<span>
+									Pagina {lotsPage} de {totalLotsPages}
+								</span>
+								<button
+									type="button"
+									onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+									disabled={lotsPage >= totalLotsPages}
+									className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+								>
+									Siguiente
+								</button>
+							</div>
+						</>
 					)}
 				</section>
 

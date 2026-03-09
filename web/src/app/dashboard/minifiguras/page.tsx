@@ -44,6 +44,9 @@ type MissingPartEntry = {
 	color_name: string | null;
 };
 
+type PartImageLookup = Record<string, string | null>;
+type PartImageRequestItem = { part_num: string; color_name?: string | null };
+
 type FigureViewMode = "all" | "missing" | "complete";
 
 const SEARCH_SYNONYMS: Record<string, string[]> = {
@@ -191,8 +194,10 @@ export default function MinifigurasPage() {
 	const [missingPartsByFigureKey, setMissingPartsByFigureKey] = useState<Record<string, MissingPartEntry[]>>({});
 	const [ownedByFigureKey, setOwnedByFigureKey] = useState<Record<string, boolean>>({});
 	const [favoriteByFigureKey, setFavoriteByFigureKey] = useState<Record<string, boolean>>({});
+	const [missingPartImages, setMissingPartImages] = useState<PartImageLookup>({});
 	const [showOnlyFavoriteFigures, setShowOnlyFavoriteFigures] = useState(false);
 	const userMetadataRef = useRef<Record<string, unknown>>({});
+	const missingPartImageInFlightRef = useRef<Set<string>>(new Set());
 	const partsUncheckedRef = useRef<Record<string, string[]>>({});
 	const missingPartsRef = useRef<Record<string, MissingPartEntry[]>>({});
 	const partsPersistQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -205,6 +210,73 @@ export default function MinifigurasPage() {
 
 	function getPartRowKey(part: MinifigurePart, index: number) {
 		return `${part.part_num}:${part.color_name ?? "sin-color"}:${part.is_spare ? "extra" : "normal"}:${index}`;
+	}
+
+	function getPartImageKey(partNum: string, colorName: string | null | undefined) {
+		const normalizedColor = (colorName ?? "")
+			.replace(/\(chino\)/gi, "")
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.trim();
+		return `${partNum.trim()}::${normalizedColor}`;
+	}
+
+	async function loadMissingPartImages(items: PartImageRequestItem[]) {
+		const normalizedItems = items
+			.map((item) => ({
+				part_num: item.part_num.trim(),
+				color_name: item.color_name ?? null,
+			}))
+			.filter((item) => item.part_num.length > 0);
+
+		if (normalizedItems.length === 0) return;
+
+		const uniqueByKey = new Map<string, PartImageRequestItem>();
+		for (const item of normalizedItems) {
+			const key = getPartImageKey(item.part_num, item.color_name);
+			if (!uniqueByKey.has(key)) uniqueByKey.set(key, item);
+		}
+
+		const missingItems = [...uniqueByKey.entries()]
+			.filter(([key]) => !(key in missingPartImages) && !missingPartImageInFlightRef.current.has(key))
+			.map(([, item]) => item);
+
+		if (missingItems.length === 0) return;
+
+		const chunkSize = 80;
+		for (let index = 0; index < missingItems.length; index += chunkSize) {
+			const chunk = missingItems.slice(index, index + chunkSize);
+			const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
+			for (const key of requestedKeys) missingPartImageInFlightRef.current.add(key);
+
+			try {
+				const response = await fetch("/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ items: chunk }),
+				});
+
+				if (!response.ok) continue;
+
+				const payload = (await response.json()) as {
+					results?: Array<{ key: string; part_img_url: string | null }>;
+				};
+
+				const additions: PartImageLookup = {};
+				for (const row of payload.results ?? []) {
+					if (!row.key) continue;
+					additions[row.key] = row.part_img_url;
+				}
+
+				for (const key of requestedKeys) {
+					if (!(key in additions)) additions[key] = null;
+				}
+
+				setMissingPartImages((current) => ({ ...current, ...additions }));
+			} finally {
+				for (const key of requestedKeys) missingPartImageInFlightRef.current.delete(key);
+			}
+		}
 	}
 
 	useEffect(() => {
@@ -1098,6 +1170,129 @@ export default function MinifigurasPage() {
 			? themes.find((theme) => theme.id === missingSeriesFilterThemeId)?.name ?? `Serie ${missingSeriesFilterThemeId}`
 			: "";
 
+	useEffect(() => {
+		const previewItems: PartImageRequestItem[] = [];
+		for (const figure of visibleCards) {
+			const missing = (missingPartsByFigureKey[figure.figureKey] ?? []).slice(0, 3);
+			for (const part of missing) {
+				previewItems.push({ part_num: part.part_num, color_name: part.color_name });
+			}
+		}
+		void loadMissingPartImages(previewItems);
+	}, [visibleCards, missingPartsByFigureKey]);
+
+	const renderFigureCard = (figure: (typeof visibleCards)[number]) => {
+		const isOwned = ownedByFigureKey[figure.figureKey] === true;
+		const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
+		const totalMissingCount = missingPartsByFigureKey[figure.figureKey]?.length ?? 0;
+		const hasMissingPieces = totalMissingCount > 0;
+		const missingPreview = (missingPartsByFigureKey[figure.figureKey] ?? []).slice(0, 3);
+		const shouldShowMissingCountTile = totalMissingCount > 3;
+		const imagePreviewParts = shouldShowMissingCountTile ? missingPreview.slice(0, 2) : missingPreview;
+		const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
+		const imageContainerClass = hasMissingPieces
+			? "relative h-[160px] overflow-hidden rounded-md bg-slate-100"
+			: "relative aspect-square overflow-hidden rounded-md bg-slate-100";
+		const favoriteButtonClass = hasMissingPieces
+			? "absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow"
+			: "absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow";
+		const favoriteIconClass = hasMissingPieces
+			? `h-5 w-5 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`
+			: `h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`;
+		const mainImageClass = hasMissingPieces ? "h-full w-full object-contain p-1" : "h-full w-full object-contain";
+
+		return (
+			<article
+				key={`${figure.themeId}:${figure.name}`}
+				className={`rounded-lg border p-1 ${
+					cardTone === "owned-dark"
+						? "border-[#025080] bg-[#025080]"
+						: cardTone === "owned-light"
+							? "border-[#5aa5d3] bg-[#5aa5d3]"
+							: "border-slate-200 bg-white"
+				}`}
+			>
+				<div className={imageContainerClass}>
+					<button
+						type="button"
+						onClick={() => toggleFavoriteFigure(figure.themeId, figure.name)}
+						className={favoriteButtonClass}
+						title={isFavoriteFigure ? "Quitar favorita" : "Marcar favorita"}
+					>
+						<svg
+							viewBox="0 0 24 24"
+							className={favoriteIconClass}
+							fill={isFavoriteFigure ? "currentColor" : "none"}
+							stroke="currentColor"
+							strokeWidth="1.7"
+							aria-hidden="true"
+						>
+							<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+						</svg>
+					</button>
+					{figure.imageUrl ? (
+						<button
+							type="button"
+							onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)}
+							className="block h-full w-full"
+							title="Ver imagen ampliada"
+						>
+							<img src={figure.imageUrl} alt={figure.name} loading="lazy" className={mainImageClass} />
+						</button>
+					) : (
+						<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
+					)}
+				</div>
+				<p className={`mt-1 line-clamp-2 text-[10px] font-medium ${cardTone === "base" ? "text-slate-900" : "text-blue-50"}`}>{figure.name}</p>
+				<p className={`mt-0.5 text-[9px] ${cardTone === "base" ? "text-slate-500" : "text-blue-200"}`}>{figure.themeName}</p>
+				{hasMissingPieces && missingPreview.length > 0 ? (
+					<div className="mt-1 grid grid-cols-3 gap-1">
+						{imagePreviewParts.map((part, index) => {
+							const partKey = getPartImageKey(part.part_num, part.color_name);
+							const partImageUrl = missingPartImages[partKey] ?? null;
+							return (
+								<div key={`${figure.figureKey}:${part.part_num}:${part.color_name ?? "sin-color"}:${index}`} className="overflow-hidden rounded border border-slate-300 bg-white/80">
+									{partImageUrl ? (
+										<button
+											type="button"
+											onClick={() => openImageZoom(partImageUrl, `${part.name} (${part.part_num})`)}
+											title={`${part.name} (${part.part_num})`}
+											className="block h-9 w-full"
+										>
+											<img src={partImageUrl} alt={`${part.name} ${part.part_num}`} loading="lazy" className="h-full w-full object-contain p-0.5" />
+										</button>
+									) : (
+										<div className="flex h-9 w-full items-center justify-center text-[8px] text-slate-500">{part.part_num}</div>
+									)}
+								</div>
+							);
+						})}
+						{shouldShowMissingCountTile ? (
+							<div className="flex h-9 w-full flex-col items-center justify-center rounded border border-slate-300 bg-white/80 px-1 text-center text-slate-700">
+								<span className="text-sm font-bold leading-none">{totalMissingCount}</span>
+								<span className="text-[7px] font-semibold uppercase tracking-wide leading-none">faltantes</span>
+							</div>
+						) : null}
+					</div>
+				) : null}
+				<div className="mt-1 flex items-center justify-between gap-1">
+					<label className={`flex cursor-pointer items-center gap-1 text-[10px] ${cardTone === "base" ? "text-slate-700" : "text-blue-50"}`}>
+						<input type="checkbox" checked={isOwned} onChange={() => toggleOwned(figure.themeId, figure.name)} className="h-3 w-3 rounded border-slate-300" />
+						<span>Lo tengo</span>
+					</label>
+					<button
+						type="button"
+						onClick={() => void openPartsModal({ name: figure.name, setNum: figure.setNum, figureKey: figure.figureKey })}
+						disabled={!figure.setNum}
+						className={`rounded-md border px-1 py-0.5 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${cardTone === "base" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : "border-blue-300 text-blue-50 hover:bg-blue-800"}`}
+					>
+						Piezas
+					</button>
+				</div>
+			</article>
+		);
+	};
+
 	return (
 		<div className="bg-lego-tile min-h-screen px-3 py-5 sm:px-5 sm:py-7">
 			<main className="mx-auto w-full max-w-6xl rounded-2xl bg-white p-4 shadow-xl sm:p-6">
@@ -1180,68 +1375,8 @@ export default function MinifigurasPage() {
 						) : visibleCards.length === 0 ? (
 							<p className="text-sm text-slate-700">No se encontraron minifiguras para "{searchInput.trim()}".</p>
 						) : (
-							<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-4">
-								{visibleCards.map((figure) => {
-									const isOwned = ownedByFigureKey[figure.figureKey] === true;
-									const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
-									const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
-									const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
-									return (
-										<article
-											key={`${figure.themeId}:${figure.name}`}
-											className={`rounded-lg border p-1 ${
-												cardTone === "owned-dark"
-													? "border-[#025080] bg-[#025080]"
-													: cardTone === "owned-light"
-														? "border-[#5aa5d3] bg-[#5aa5d3]"
-														: "border-slate-200 bg-white"
-											}`}
-										>
-									<div className="relative aspect-square overflow-hidden rounded-md bg-slate-100">
-										<button
-											type="button"
-											onClick={() => toggleFavoriteFigure(figure.themeId, figure.name)}
-											className="absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow"
-											title={isFavoriteFigure ? "Quitar favorita" : "Marcar favorita"}
-										>
-											<svg
-												viewBox="0 0 24 24"
-												className={`h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`}
-												fill={isFavoriteFigure ? "currentColor" : "none"}
-												stroke="currentColor"
-												strokeWidth="1.7"
-												aria-hidden="true"
-											>
-												<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-											</svg>
-										</button>
-										{figure.imageUrl ? (
-											<button type="button" onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)} className="block h-full w-full" title="Ver imagen ampliada">
-												<img src={figure.imageUrl} alt={figure.name} loading="lazy" className="h-full w-full object-contain" />
-													</button>
-												) : (
-													<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
-												)}
-											</div>
-											<p className={`mt-1 line-clamp-2 text-[10px] font-medium ${cardTone === "base" ? "text-slate-900" : "text-blue-50"}`}>{figure.name}</p>
-											<p className={`mt-0.5 text-[9px] ${cardTone === "base" ? "text-slate-500" : "text-blue-200"}`}>{figure.themeName}</p>
-											<div className="mt-1 flex items-center justify-between gap-1">
-												<label className={`flex cursor-pointer items-center gap-1 text-[10px] ${cardTone === "base" ? "text-slate-700" : "text-blue-50"}`}>
-													<input type="checkbox" checked={isOwned} onChange={() => toggleOwned(figure.themeId, figure.name)} className="h-3 w-3 rounded border-slate-300" />
-													<span>Lo tengo</span>
-												</label>
-												<button
-													type="button"
-													onClick={() => void openPartsModal({ name: figure.name, setNum: figure.setNum, figureKey: figure.figureKey })}
-													disabled={!figure.setNum}
-													className={`rounded-md border px-1 py-0.5 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${cardTone === "base" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : "border-blue-300 text-blue-50 hover:bg-blue-800"}`}
-												>
-													Piezas
-												</button>
-											</div>
-										</article>
-									);
-								})}
+							<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-5">
+								{visibleCards.map((figure) => renderFigureCard(figure))}
 							</div>
 						)
 					) : selectedThemeIds.length === 0 ? (
@@ -1249,83 +1384,8 @@ export default function MinifigurasPage() {
 					) : visibleCards.length === 0 ? (
 						<p className="text-sm text-slate-700">Cargando minifiguras seleccionadas...</p>
 					) : (
-						<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-4">
-						{visibleCards.map((figure) => {
-							const isOwned = ownedByFigureKey[figure.figureKey] === true;
-							const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
-							const hasMissingPieces = (missingPartsByFigureKey[figure.figureKey]?.length ?? 0) > 0;
-							const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
-								return (
-								<article
-									key={`${figure.themeId}:${figure.name}`}
-									className={`rounded-lg border p-1 ${
-										cardTone === "owned-dark"
-											? "border-[#025080] bg-[#025080]"
-											: cardTone === "owned-light"
-												? "border-[#5aa5d3] bg-[#5aa5d3]"
-												: "border-slate-200 bg-white"
-									}`}
-								>
-									<div className="relative aspect-square overflow-hidden rounded-md bg-slate-100">
-										<button
-											type="button"
-											onClick={() => toggleFavoriteFigure(figure.themeId, figure.name)}
-											className="absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow"
-											title={isFavoriteFigure ? "Quitar favorita" : "Marcar favorita"}
-										>
-											<svg
-												viewBox="0 0 24 24"
-												className={`h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`}
-												fill={isFavoriteFigure ? "currentColor" : "none"}
-												stroke="currentColor"
-												strokeWidth="1.7"
-												aria-hidden="true"
-											>
-												<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-											</svg>
-										</button>
-										{figure.imageUrl ? (
-											<button
-												type="button"
-												onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)}
-												className="block h-full w-full"
-												title="Ver imagen ampliada"
-											>
-												<img
-													src={figure.imageUrl}
-													alt={figure.name}
-													loading="lazy"
-													className="h-full w-full object-contain"
-												/>
-											</button>
-										) : (
-											<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
-										)}
-									</div>
-									<p className={`mt-1 line-clamp-2 text-[10px] font-medium ${cardTone === "base" ? "text-slate-900" : "text-blue-50"}`}>{figure.name}</p>
-									<p className={`mt-0.5 text-[9px] ${cardTone === "base" ? "text-slate-500" : "text-blue-200"}`}>{figure.themeName}</p>
-									<div className="mt-1 flex items-center justify-between gap-1">
-										<label className={`flex cursor-pointer items-center gap-1 text-[10px] ${cardTone === "base" ? "text-slate-700" : "text-blue-50"}`}>
-											<input
-												type="checkbox"
-												checked={isOwned}
-												onChange={() => toggleOwned(figure.themeId, figure.name)}
-												className="h-3 w-3 rounded border-slate-300"
-											/>
-											<span>Lo tengo</span>
-										</label>
-										<button
-											type="button"
-											onClick={() => void openPartsModal({ name: figure.name, setNum: figure.setNum, figureKey: figure.figureKey })}
-											disabled={!figure.setNum}
-											className={`rounded-md border px-1 py-0.5 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${cardTone === "base" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : "border-blue-300 text-blue-50 hover:bg-blue-800"}`}
-										>
-											Piezas
-										</button>
-									</div>
-								</article>
-							);
-							})}
+						<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-5">
+							{visibleCards.map((figure) => renderFigureCard(figure))}
 						</div>
 					)}
 				</div>

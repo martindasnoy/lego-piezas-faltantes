@@ -63,6 +63,7 @@ export default function PoolPage() {
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
 	const [showPiecesLots, setShowPiecesLots] = useState(true);
 	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
+	const [lotsPage, setLotsPage] = useState(1);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 
 	function isMinifigurePartsListName(listName: string | null | undefined) {
@@ -361,6 +362,23 @@ export default function PoolPage() {
 			});
 	}, [filteredLots, sortBy]);
 
+	const LOTS_PER_PAGE = 40;
+	const totalLotsPages = Math.max(1, Math.ceil(lotCards.length / LOTS_PER_PAGE));
+	const paginatedLotCards = useMemo(() => {
+		const start = (lotsPage - 1) * LOTS_PER_PAGE;
+		return lotCards.slice(start, start + LOTS_PER_PAGE);
+	}, [lotCards, lotsPage]);
+
+	useEffect(() => {
+		if (lotsPage > totalLotsPages) {
+			setLotsPage(totalLotsPages);
+		}
+	}, [lotsPage, totalLotsPages]);
+
+	useEffect(() => {
+		setLotsPage(1);
+	}, [sortBy, showPiecesLots, showMinifigurePartsLots]);
+
 	if (loading) {
 		return (
 			<div className="bg-lego-tile font-chewy flex min-h-screen items-center justify-center px-6 text-center text-2xl text-white sm:text-3xl">
@@ -432,7 +450,28 @@ export default function PoolPage() {
 					</section>
 				) : (
 					<section className="space-y-2">
-						{lotCards.map((lot) => (
+						<div className="mb-2 flex items-center justify-center gap-2 text-xs text-slate-600">
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+								disabled={lotsPage <= 1}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Anterior
+							</button>
+							<span>
+								Pagina {lotsPage} de {totalLotsPages}
+							</span>
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+								disabled={lotsPage >= totalLotsPages}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Siguiente
+							</button>
+						</div>
+						{paginatedLotCards.map((lot) => (
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
@@ -538,6 +577,27 @@ export default function PoolPage() {
 								</div>
 							</article>
 						))}
+						<div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-600">
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+								disabled={lotsPage <= 1}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Anterior
+							</button>
+							<span>
+								Pagina {lotsPage} de {totalLotsPages}
+							</span>
+							<button
+								type="button"
+								onClick={() => setLotsPage((current) => Math.min(totalLotsPages, current + 1))}
+								disabled={lotsPage >= totalLotsPages}
+								className="rounded-md border border-slate-300 px-2 py-1 disabled:opacity-40"
+							>
+								Siguiente
+							</button>
+						</div>
 					</section>
 				)}
 
