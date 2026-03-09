@@ -30,6 +30,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
     - Crea RPC para mostrar integrantes BALUG (nombre + red social) en dashboard.
 14. `part_image_cache.sql`
     - Crea tabla DB-first para cache de imagenes de piezas (`part_num + color`) con RLS y permisos para API.
+15. `part_popularity_cache.sql`
+    - Crea tabla de ranking por pieza (`set_count`) para ordenar sugerencias del desplegable por popularidad.
 
 ## Verificacion rapida
 

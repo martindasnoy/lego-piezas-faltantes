@@ -1,0 +1,41 @@
+name: Catalog Sync (Every 5 Days)
+
+on:
+  schedule:
+    - cron: "0 3 */5 * *"
+  workflow_dispatch:
+
+jobs:
+  sync-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secrets
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+          REBRICKABLE_PREWARM_TOKEN: ${{ secrets.REBRICKABLE_PREWARM_TOKEN }}
+        run: |
+          [ -n "$PREWARM_BASE_URL" ] || (echo "Missing PREWARM_BASE_URL" && exit 1)
+          [ -n "$REBRICKABLE_PREWARM_TOKEN" ] || (echo "Missing REBRICKABLE_PREWARM_TOKEN" && exit 1)
+
+      - name: Sync category list into KV
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+          REBRICKABLE_PREWARM_TOKEN: ${{ secrets.REBRICKABLE_PREWARM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          ids=$(curl -sS --retry 3 --retry-delay 2 --retry-all-errors "$PREWARM_BASE_URL/api/rebrickable/prewarm?list=1" -H "x-prewarm-token: $REBRICKABLE_PREWARM_TOKEN" | jq -r '.results[].id')
+
+          total=0
+          failures=0
+          for id in $ids; do
+            total=$((total + 1))
+            echo "Syncing category $id"
+            if ! curl -sS --fail --retry 3 --retry-delay 3 --retry-all-errors -X POST "$PREWARM_BASE_URL/api/rebrickable/prewarm?category_id=$id" -H "x-prewarm-token: $REBRICKABLE_PREWARM_TOKEN" > /dev/null; then
+              echo "Warning: category $id failed"
+              failures=$((failures + 1))
+            fi
+            sleep 2
+          done
+
+          echo "Catalog sync completed. total=$total failures=$failures"
