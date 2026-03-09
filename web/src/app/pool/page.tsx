@@ -65,6 +65,7 @@ export default function PoolPage() {
 	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 	const imageRequestAttemptsRef = useRef<Record<string, number>>({});
+	const imageLastAttemptAtRef = useRef<Record<string, number>>({});
 
 	function isMinifigurePartsListName(listName: string | null | undefined) {
 		const normalized = String(listName ?? "").trim();
@@ -256,14 +257,20 @@ export default function PoolPage() {
 			}
 		}
 
+		const now = Date.now();
 		const missingItems = [...uniqueByKey.entries()]
 			.filter(([key]) => {
 				if (imageRequestInFlightRef.current.has(key)) return false;
 				if (!(key in partImages)) return true;
 				if (partImages[key] !== null) return false;
-				return (imageRequestAttemptsRef.current[key] ?? 0) < 3;
+
+				const attempts = imageRequestAttemptsRef.current[key] ?? 0;
+				const lastAttemptAt = imageLastAttemptAtRef.current[key] ?? 0;
+				if (attempts < 8) return now - lastAttemptAt > 15000;
+				return now - lastAttemptAt > 300000;
 			})
-			.map(([, item]) => item);
+			.map(([, item]) => item)
+			.slice(0, 40);
 
 		if (missingItems.length === 0) return;
 
@@ -271,7 +278,10 @@ export default function PoolPage() {
 		for (let index = 0; index < missingItems.length; index += chunkSize) {
 			const chunk = missingItems.slice(index, index + chunkSize);
 			const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
-			for (const key of requestedKeys) imageRequestInFlightRef.current.add(key);
+			for (const key of requestedKeys) {
+				imageRequestInFlightRef.current.add(key);
+				imageLastAttemptAtRef.current[key] = Date.now();
+			}
 
 			try {
 				const response = await fetch("/api/rebrickable/part-images", {
@@ -285,7 +295,7 @@ export default function PoolPage() {
 						for (const key of requestedKeys) {
 							const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 							imageRequestAttemptsRef.current[key] = attempts;
-							if (attempts >= 3) next[key] = null;
+							if (attempts >= 8) next[key] = null;
 							else delete next[key];
 						}
 						return next;
@@ -315,7 +325,7 @@ export default function PoolPage() {
 
 						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 						imageRequestAttemptsRef.current[key] = attempts;
-						if (attempts >= 3) next[key] = null;
+						if (attempts >= 8) next[key] = null;
 						else delete next[key];
 					}
 					return next;
@@ -326,7 +336,7 @@ export default function PoolPage() {
 					for (const key of requestedKeys) {
 						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 						imageRequestAttemptsRef.current[key] = attempts;
-						if (attempts >= 3) next[key] = null;
+						if (attempts >= 8) next[key] = null;
 						else delete next[key];
 					}
 					return next;
