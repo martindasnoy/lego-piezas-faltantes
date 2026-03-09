@@ -89,6 +89,14 @@ export async function GET(request: Request) {
 
 		if (!searchResponse.ok && !exactResponse.ok) {
 			const status = searchResponse.status || exactResponse.status;
+			if (status === 403) {
+				const browserUrl = new URL(REBRICKABLE_API_BASE);
+				browserUrl.searchParams.set("search", query);
+				browserUrl.searchParams.set("page_size", "10");
+				browserUrl.searchParams.set("inc_part_details", "1");
+				browserUrl.searchParams.set("key", usedKey);
+				return NextResponse.redirect(browserUrl.toString(), 307);
+			}
 			const detail =
 				status === 429
 					? "Limite de Rebrickable alcanzado. Intenta en unos segundos."
