@@ -47,7 +47,6 @@ export default function PoolVentaPage() {
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario" | "valor_asc" | "valor_desc">("pieza");
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
 	const imageRequestAttemptsRef = useRef<Record<string, number>>({});
-	const imageLastAttemptAtRef = useRef<Record<string, number>>({});
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -140,29 +139,20 @@ export default function PoolVentaPage() {
 			if (!uniqueByKey.has(key)) uniqueByKey.set(key, item);
 		}
 
-		const now = Date.now();
 		const missingItems = [...uniqueByKey.entries()]
 			.filter(([key]) => {
 				if (imageRequestInFlightRef.current.has(key)) return false;
 				if (!(key in partImages)) return true;
 				if (partImages[key] !== null) return false;
-
-				const attempts = imageRequestAttemptsRef.current[key] ?? 0;
-				const lastAttemptAt = imageLastAttemptAtRef.current[key] ?? 0;
-				if (attempts < 8) return now - lastAttemptAt > 15000;
-				return now - lastAttemptAt > 300000;
+				return (imageRequestAttemptsRef.current[key] ?? 0) < 3;
 			})
-			.map(([, item]) => item)
-			.slice(0, 40);
+			.map(([, item]) => item);
 
 		if (missingItems.length === 0) return;
 		const requestedKeys = missingItems.map((item) => getPartImageKey(item.part_num, item.color_name));
 
 		try {
-			for (const key of requestedKeys) {
-				imageRequestInFlightRef.current.add(key);
-				imageLastAttemptAtRef.current[key] = Date.now();
-			}
+			for (const key of requestedKeys) imageRequestInFlightRef.current.add(key);
 
 			const response = await fetch("/api/rebrickable/part-images", {
 				method: "POST",
@@ -176,7 +166,7 @@ export default function PoolVentaPage() {
 					for (const key of requestedKeys) {
 						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 						imageRequestAttemptsRef.current[key] = attempts;
-						if (attempts >= 8) next[key] = null;
+						if (attempts >= 3) next[key] = null;
 						else delete next[key];
 					}
 					return next;
@@ -203,7 +193,7 @@ export default function PoolVentaPage() {
 
 					const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 					imageRequestAttemptsRef.current[key] = attempts;
-					if (attempts >= 8) next[key] = null;
+					if (attempts >= 3) next[key] = null;
 					else delete next[key];
 				}
 				return next;
@@ -214,7 +204,7 @@ export default function PoolVentaPage() {
 				for (const key of requestedKeys) {
 					const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
 					imageRequestAttemptsRef.current[key] = attempts;
-					if (attempts >= 8) next[key] = null;
+					if (attempts >= 3) next[key] = null;
 					else delete next[key];
 				}
 				return next;
