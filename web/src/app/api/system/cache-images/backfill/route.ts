@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase-admin";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 const READ_PAGE_SIZE = 1000;
 const DEFAULT_BATCH_SIZE = 180;
@@ -50,11 +51,33 @@ async function readAllUniqueListPairs() {
 }
 
 async function callPartImages(origin: string, items: Array<{ part_num: string; color_name: string | null }>) {
-	const response = await fetch(`${origin}/api/rebrickable/part-images`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ items }),
-	});
+	let response: Response;
+
+	try {
+		const env = getCloudflareContext()?.env as Record<string, unknown> | undefined;
+		const service = env?.WORKER_SELF_REFERENCE as { fetch?: (request: Request) => Promise<Response> } | undefined;
+		if (service?.fetch) {
+			response = await service.fetch(
+				new Request("https://internal/api/rebrickable/part-images", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ items }),
+				}),
+			);
+		} else {
+			response = await fetch(`${origin}/api/rebrickable/part-images`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ items }),
+			});
+		}
+	} catch {
+		response = await fetch(`${origin}/api/rebrickable/part-images`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ items }),
+		});
+	}
 
 	if (!response.ok) {
 		const text = await response.text();
