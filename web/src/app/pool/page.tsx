@@ -269,14 +269,17 @@ export default function PoolPage() {
 				if (attempts < 8) return now - lastAttemptAt > 15000;
 				return now - lastAttemptAt > 300000;
 			})
-			.map(([, item]) => item)
-			.slice(0, 40);
+			.map(([, item]) => item);
 
 		if (missingItems.length === 0) return;
 
-		const chunkSize = 100;
+		const chunkSize = 80;
+		const chunks: PartImageRequestItem[][] = [];
 		for (let index = 0; index < missingItems.length; index += chunkSize) {
-			const chunk = missingItems.slice(index, index + chunkSize);
+			chunks.push(missingItems.slice(index, index + chunkSize));
+		}
+
+		const processChunk = async (chunk: PartImageRequestItem[]) => {
 			const requestedKeys = chunk.map((item) => getPartImageKey(item.part_num, item.color_name));
 			for (const key of requestedKeys) {
 				imageRequestInFlightRef.current.add(key);
@@ -289,6 +292,7 @@ export default function PoolPage() {
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ items: chunk }),
 				});
+
 				if (!response.ok) {
 					setPartImages((current) => {
 						const next = { ...current };
@@ -300,7 +304,7 @@ export default function PoolPage() {
 						}
 						return next;
 					});
-					continue;
+					return;
 				}
 
 				const payload = (await response.json()) as {
@@ -320,13 +324,12 @@ export default function PoolPage() {
 						if (imageUrl) {
 							next[key] = imageUrl;
 							imageRequestAttemptsRef.current[key] = 0;
-							continue;
+						} else {
+							const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
+							imageRequestAttemptsRef.current[key] = attempts;
+							if (attempts >= 8) next[key] = null;
+							else delete next[key];
 						}
-
-						const attempts = (imageRequestAttemptsRef.current[key] ?? 0) + 1;
-						imageRequestAttemptsRef.current[key] = attempts;
-						if (attempts >= 8) next[key] = null;
-						else delete next[key];
 					}
 					return next;
 				});
@@ -344,6 +347,11 @@ export default function PoolPage() {
 			} finally {
 				for (const key of requestedKeys) imageRequestInFlightRef.current.delete(key);
 			}
+		};
+
+		const parallel = 3;
+		for (let index = 0; index < chunks.length; index += parallel) {
+			await Promise.all(chunks.slice(index, index + parallel).map((chunk) => processChunk(chunk)));
 		}
 	}
 
