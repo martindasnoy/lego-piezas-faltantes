@@ -52,11 +52,3 @@ jobs:
           done
 
           echo "Minifigure prewarm done (failures: $failures)"
-
-      - name: Prewarm pool part images into R2
-        run: |
-          set -euo pipefail
-          BASE_URL="${{ secrets.PREWARM_BASE_URL }}"
-          TOKEN="${{ secrets.REBRICKABLE_PREWARM_TOKEN }}"
-
-          curl -sS --fail --retry 4 --retry-delay 3 --retry-all-errors -X POST "$BASE_URL/api/rebrickable/prewarm-images?limit=2500" -H "x-prewarm-token: $TOKEN"
