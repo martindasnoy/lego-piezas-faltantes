@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
 import { getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
-import { fetchAllCategoryPartsFromRebrickable } from "@/lib/rebrickable-catalog-cache";
 import { getPopularityByPartNums, upsertPopularities } from "@/lib/part-popularity-db";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
@@ -104,8 +103,68 @@ function normalizePartNums(raw: unknown): string[] {
 	return [...new Set(raw.map((value) => String(value ?? "").trim().toUpperCase()).filter(Boolean))];
 }
 
+function extractJsonObject(text: string) {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end <= start) {
+		throw new Error("json-extract-failed");
+	}
+	return JSON.parse(text.slice(start, end + 1)) as unknown;
+}
+
+async function fetchCategoryPartNumsPage(categoryId: string, page: number, pageSize: number, apiKey: string) {
+	const url = new URL("https://rebrickable.com/api/v3/lego/parts/");
+	url.searchParams.set("part_cat_id", categoryId);
+	url.searchParams.set("page", String(page));
+	url.searchParams.set("page_size", String(pageSize));
+	url.searchParams.set("inc_part_details", "1");
+	url.searchParams.set("key", apiKey);
+
+	const direct = await fetch(url.toString(), {
+		headers: getRebrickableHeaders(apiKey),
+		next: { revalidate: 60 * 60 * 6 },
+	});
+
+	if (direct.ok) {
+		const payload = (await direct.json()) as { count?: number; results?: Array<{ part_num?: string | null }> };
+		return {
+			count: Number(payload.count ?? 0),
+			partNums: normalizePartNums((payload.results ?? []).map((row) => row.part_num ?? "")),
+		};
+	}
+
+	if (direct.status !== 403 && direct.status !== 429) {
+		throw new Error(String(direct.status));
+	}
+
+	const proxyUrl = `https://r.jina.ai/http://${url.toString().replace(/^https?:\/\//, "")}`;
+	const proxied = await fetch(proxyUrl, {
+		headers: { Accept: "text/plain" },
+		next: { revalidate: 60 * 60 * 6 },
+	});
+
+	if (!proxied.ok) {
+		throw new Error(String(proxied.status));
+	}
+
+	const text = await proxied.text();
+	const payload = extractJsonObject(text) as { count?: number; results?: Array<{ part_num?: string | null }> };
+	return {
+		count: Number(payload.count ?? 0),
+		partNums: normalizePartNums((payload.results ?? []).map((row) => row.part_num ?? "")),
+	};
+}
+
 export async function POST(request: Request) {
-	let body: { offset?: number; batch_size?: number; force?: boolean; part_nums?: unknown; category_id?: number | string } = {};
+	let body: {
+		offset?: number;
+		batch_size?: number;
+		force?: boolean;
+		part_nums?: unknown;
+		category_id?: number | string;
+		source_page?: number;
+		source_page_size?: number;
+	} = {};
 	try {
 		body = (await request.json()) as {
 			offset?: number;
@@ -113,6 +172,8 @@ export async function POST(request: Request) {
 			force?: boolean;
 			part_nums?: unknown;
 			category_id?: number | string;
+			source_page?: number;
+			source_page_size?: number;
 		};
 	} catch {
 		body = {};
@@ -130,14 +191,25 @@ export async function POST(request: Request) {
 	try {
 		const categoryId = String(body.category_id ?? "").trim();
 		if (categoryId) {
-			const parts = await fetchAllCategoryPartsFromRebrickable(categoryId, apiKey);
-			const allPartNums = [...new Set(parts.map((part) => String(part.part_num ?? "").trim().toUpperCase()).filter(Boolean))].sort((a, b) =>
-				a.localeCompare(b, "en", { sensitivity: "base" }),
-			);
+			const sourcePage = Math.max(1, Number(body.source_page ?? 1) || 1);
+			const sourcePageSize = Math.max(50, Math.min(1000, Number(body.source_page_size ?? 1000) || 1000));
+			const source = await fetchCategoryPartNumsPage(categoryId, sourcePage, sourcePageSize, apiKey);
+			const allPartNums = source.partNums.sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+			const totalSourcePages = Math.max(1, Math.ceil(source.count / sourcePageSize));
 
 			const total = allPartNums.length;
 			if (offset >= total) {
-				return NextResponse.json({ ok: true, mode: "category", category_id: categoryId, total, processed: 0, next_offset: null, done: true });
+				return NextResponse.json({
+					ok: true,
+					mode: "category",
+					category_id: categoryId,
+					source_page: sourcePage,
+					total_source_pages: totalSourcePages,
+					total,
+					processed: 0,
+					next_offset: null,
+					done: true,
+				});
 			}
 
 			const chunk = allPartNums.slice(offset, offset + batchSize);
@@ -155,6 +227,8 @@ export async function POST(request: Request) {
 				ok: true,
 				mode: "category",
 				category_id: categoryId,
+				source_page: sourcePage,
+				total_source_pages: totalSourcePages,
 				total,
 				offset,
 				processed: chunk.length,
