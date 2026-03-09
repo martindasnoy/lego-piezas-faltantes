@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { getCachedPartColors, getCatalogKvBinding } from "@/lib/rebrickable-catalog-cache";
+import { getRuntimeEnvValue } from "@/lib/runtime-env";
+import {
+	fetchPartColorsFromRebrickable,
+	getCachedPartColors,
+	getCatalogKvBinding,
+	setCachedPartColors,
+} from "@/lib/rebrickable-catalog-cache";
 
 const MAX_ITEMS = 200;
 
@@ -86,14 +92,23 @@ export async function POST(request: Request) {
 	}
 
 	const kv = getCatalogKvBinding();
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
+	const partColorsByPartNum = new Map<string, Array<{ color_name: string; part_img_url: string | null }> | null>();
 	const pendingWithoutCache = new Set<string>();
+
 	for (const item of items) {
 		const key = getImageKey(item.part_num, item.color_name);
 		if (imageCacheByKey.has(key)) continue;
 
-		const cachedPartColors = await getCachedPartColors(item.part_num, kv);
-		if (cachedPartColors?.colors?.length) {
-			const picked = pickBestColorImage(cachedPartColors.colors, item.color_name);
+		let cachedPartColors = partColorsByPartNum.get(item.part_num);
+		if (cachedPartColors === undefined) {
+			const cached = await getCachedPartColors(item.part_num, kv);
+			cachedPartColors = cached?.colors ?? null;
+			partColorsByPartNum.set(item.part_num, cachedPartColors);
+		}
+
+		if (cachedPartColors && cachedPartColors.length > 0) {
+			const picked = pickBestColorImage(cachedPartColors, item.color_name);
 			if (picked) {
 				imageCacheByKey.set(key, picked);
 				imageCacheByPartNum.set(item.part_num, picked);
@@ -103,6 +118,27 @@ export async function POST(request: Request) {
 
 		if (imageCacheByPartNum.has(item.part_num)) continue;
 		pendingWithoutCache.add(item.part_num);
+	}
+
+	for (const partNum of pendingWithoutCache) {
+		if (!apiKey) {
+			if (!imageCacheByPartNum.has(partNum)) imageCacheByPartNum.set(partNum, null);
+			continue;
+		}
+
+		try {
+			const colors = await fetchPartColorsFromRebrickable(partNum, apiKey);
+			await setCachedPartColors(partNum, colors, kv);
+			partColorsByPartNum.set(partNum, colors);
+
+			const picked = pickBestColorImage(colors, null);
+			imageCacheByPartNum.set(partNum, picked ?? null);
+		} catch {
+			partColorsByPartNum.set(partNum, null);
+			if (!imageCacheByPartNum.has(partNum)) {
+				imageCacheByPartNum.set(partNum, null);
+			}
+		}
 	}
 
 	for (const partNum of pendingWithoutCache) {
@@ -116,6 +152,15 @@ export async function POST(request: Request) {
 		const cachedByKey = imageCacheByKey.get(key);
 		if (cachedByKey !== undefined) {
 			return { key, part_num: item.part_num, part_img_url: cachedByKey };
+		}
+
+		const partColors = partColorsByPartNum.get(item.part_num) ?? null;
+		if (partColors && partColors.length > 0) {
+			const picked = pickBestColorImage(partColors, item.color_name);
+			if (picked) {
+				imageCacheByKey.set(key, picked);
+				return { key, part_num: item.part_num, part_img_url: picked };
+			}
 		}
 
 		const byPart = imageCacheByPartNum.get(item.part_num) ?? null;
