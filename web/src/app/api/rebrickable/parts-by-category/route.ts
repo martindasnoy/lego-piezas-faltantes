@@ -39,7 +39,7 @@ async function fetchRebrickableJson<T>(url: string, apiKey: string): Promise<T> 
 	});
 
 	if (direct.ok) return (await direct.json()) as T;
-	if (direct.status !== 403) throw new Error(String(direct.status));
+	if (direct.status !== 403 && direct.status !== 429) throw new Error(String(direct.status));
 
 	const proxyUrl = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
 	const proxied = await fetch(proxyUrl, {
@@ -107,7 +107,11 @@ export async function GET(request: Request) {
 			has_previous: page > 1,
 		});
 	} catch (error) {
-		const detail = error instanceof Error && error.message ? ` (${error.message})` : "";
+		const code = error instanceof Error ? error.message : "";
+		if (code === "429") {
+			return NextResponse.json({ results: [], page, total_pages: 1, has_next: false, has_previous: false, warning: "Rate limit temporal" });
+		}
+		const detail = code ? ` (${code})` : "";
 		return NextResponse.json({ error: `No se pudo cargar piezas de categoria${detail}.` }, { status: 500 });
 	}
 
