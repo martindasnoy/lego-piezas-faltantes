@@ -1,107 +1,78 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
-import { getCachedCategoryParts } from "@/lib/rebrickable-parts-cache";
-import { getCachedMinifigureParts, getCachedMinifigureThemes, getCachedMinifiguresByTheme } from "@/lib/rebrickable-minifig-cache";
+import { fetchAllCategoryPartsFromRebrickable, setCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
-export async function POST(request: Request) {
-	const { searchParams } = new URL(request.url);
-	const categoryId = (searchParams.get("category_id") ?? "").trim();
-	const minifigureThemeId = (searchParams.get("minifigure_theme_id") ?? "").trim();
-	const includeParts = searchParams.get("include_parts") === "1";
-	const token = request.headers.get("x-prewarm-token") ?? "";
-	const configuredToken = getRuntimeEnvValue("REBRICKABLE_PREWARM_TOKEN");
-	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
-
-	if (!apiKey) {
-		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
-	}
-
-	if (configuredToken && token !== configuredToken) {
-		return NextResponse.json({ error: "Token invalido." }, { status: 401 });
-	}
-
-	try {
-		if (categoryId) {
-			await getCachedCategoryParts(categoryId, apiKey);
-			return NextResponse.json({ ok: true, category_id: categoryId });
-		}
-
-		if (minifigureThemeId) {
-			const themeIdNum = Number(minifigureThemeId);
-			if (!Number.isFinite(themeIdNum) || themeIdNum <= 0) {
-				return NextResponse.json({ error: "minifigure_theme_id invalido." }, { status: 400 });
-			}
-
-			const figures = await getCachedMinifiguresByTheme(themeIdNum, apiKey);
-			let warmedParts = 0;
-			let failedParts = 0;
-
-			if (includeParts) {
-				for (const figure of figures) {
-					if (!figure.setNum) continue;
-					try {
-						await getCachedMinifigureParts(figure.setNum, apiKey);
-						warmedParts += 1;
-					} catch {
-						failedParts += 1;
-					}
-				}
-			}
-
-			return NextResponse.json({
-				ok: true,
-				theme_id: themeIdNum,
-				figures: figures.length,
-				warmed_parts: warmedParts,
-				failed_parts: failedParts,
-			});
-		}
-
-		return NextResponse.json({ error: "Falta category_id o minifigure_theme_id." }, { status: 400 });
-	} catch {
-		return NextResponse.json({ error: "No se pudo completar el precalentado solicitado." }, { status: 500 });
-	}
+function isTokenValid(request: Request) {
+	const configuredToken = getRuntimeEnvValue("REBRICKABLE_PREWARM_TOKEN") || getRuntimeEnvValue("CATALOG_PREWARM_TOKEN");
+	if (!configuredToken) return true;
+	const incomingToken = request.headers.get("x-prewarm-token") ?? "";
+	return incomingToken === configuredToken;
 }
 
 export async function GET(request: Request) {
-	const { searchParams } = new URL(request.url);
-	const token = request.headers.get("x-prewarm-token") ?? "";
-	const configuredToken = getRuntimeEnvValue("REBRICKABLE_PREWARM_TOKEN");
-	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
-	const listMode = (searchParams.get("list") ?? "").trim();
-
-	if (configuredToken && token !== configuredToken) {
+	if (!isTokenValid(request)) {
 		return NextResponse.json({ error: "Token invalido." }, { status: 401 });
 	}
 
-	if (listMode === "1") {
+	const { searchParams } = new URL(request.url);
+	const list = (searchParams.get("list") ?? "").trim();
+
+	if (list === "1") {
 		return NextResponse.json({
 			results: staticRebrickableCategories.map((category) => ({ id: category.id, name: category.name })),
 		});
 	}
 
+	return NextResponse.json({ ok: true, mode: "catalog", available: ["list", "category_id", "all"] });
+}
+
+export async function POST(request: Request) {
+	if (!isTokenValid(request)) {
+		return NextResponse.json({ error: "Token invalido." }, { status: 401 });
+	}
+
+	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 	if (!apiKey) {
 		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
 	}
 
-	if (listMode === "minifigures") {
-		try {
-			const themes = await getCachedMinifigureThemes(apiKey);
-			return NextResponse.json({
-				results: themes.map((theme) => ({ id: theme.id, name: theme.name })),
-			});
-		} catch {
-			return NextResponse.json({ error: "No se pudo listar minifiguras para prewarm." }, { status: 500 });
-		}
-	}
+	const { searchParams } = new URL(request.url);
+	const categoryId = (searchParams.get("category_id") ?? "").trim();
+	const all = searchParams.get("all") === "1";
 
 	try {
-		for (const category of staticRebrickableCategories) {
-			await getCachedCategoryParts(String(category.id), apiKey);
+		if (all) {
+			const stats: Array<{ category_id: number; parts: number; ok: boolean; error?: string }> = [];
+			for (const category of staticRebrickableCategories) {
+				try {
+					const parts = await fetchAllCategoryPartsFromRebrickable(String(category.id), apiKey);
+					await setCachedCategoryAllParts(String(category.id), parts);
+					stats.push({ category_id: category.id, parts: parts.length, ok: true });
+				} catch (error) {
+					stats.push({
+						category_id: category.id,
+						parts: 0,
+						ok: false,
+						error: error instanceof Error ? error.message : "error",
+					});
+				}
+			}
+
+			const warmed = stats.filter((item) => item.ok).length;
+			const failed = stats.length - warmed;
+			return NextResponse.json({ ok: true, warmed, failed, stats });
 		}
-		return NextResponse.json({ ok: true, warmed: staticRebrickableCategories.length });
-	} catch {
-		return NextResponse.json({ error: "No se pudo completar el precalentado total." }, { status: 500 });
+
+		if (!categoryId) {
+			return NextResponse.json({ error: "Falta category_id o all=1." }, { status: 400 });
+		}
+
+		const parts = await fetchAllCategoryPartsFromRebrickable(categoryId, apiKey);
+		await setCachedCategoryAllParts(categoryId, parts);
+		return NextResponse.json({ ok: true, category_id: categoryId, parts: parts.length });
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : "error";
+		return NextResponse.json({ error: `No se pudo completar la bajada inicial (${detail}).` }, { status: 500 });
 	}
 }

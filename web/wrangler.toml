@@ -9,3 +9,7 @@ binding = "ASSETS"
 
 [vars]
 NEXTJS_ENV = "production"
+
+[[kv_namespaces]]
+binding = "CATALOG_CACHE"
+id = "bf04ba16499a409e83bd8d1c329171a3"
