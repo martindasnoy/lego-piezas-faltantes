@@ -7,9 +7,16 @@ compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 directory = ".open-next/assets"
 binding = "ASSETS"
 
+[images]
+binding = "IMAGES"
+
 [vars]
 NEXTJS_ENV = "production"
 
 [[kv_namespaces]]
 binding = "CATALOG_CACHE"
 id = "bf04ba16499a409e83bd8d1c329171a3"
+
+[[services]]
+binding = "WORKER_SELF_REFERENCE"
+service = "lego-piezas-faltantes"
