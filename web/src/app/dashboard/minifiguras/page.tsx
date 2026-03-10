@@ -196,6 +196,9 @@ export default function MinifigurasPage() {
 	const [favoriteByFigureKey, setFavoriteByFigureKey] = useState<Record<string, boolean>>({});
 	const [missingPartImages, setMissingPartImages] = useState<PartImageLookup>({});
 	const [showOnlyFavoriteFigures, setShowOnlyFavoriteFigures] = useState(false);
+	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#025080");
+	const [currentLugSecondaryColor, setCurrentLugSecondaryColor] = useState("#e11d48");
+	const [currentLugAccentColor, setCurrentLugAccentColor] = useState("#5aa5d3");
 	const userMetadataRef = useRef<Record<string, unknown>>({});
 	const missingPartImageInFlightRef = useRef<Set<string>>(new Set());
 	const partsUncheckedRef = useRef<Record<string, string[]>>({});
@@ -219,6 +222,77 @@ export default function MinifigurasPage() {
 			.replace(/\s+/g, " ")
 			.trim();
 		return `${partNum.trim()}::${normalizedColor}`;
+	}
+
+	function normalizeHexColor(value: string | null | undefined, fallback: string) {
+		const normalized = String(value ?? "").trim();
+		if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized;
+		return fallback;
+	}
+
+	function getTextColorForBackground(hex: string) {
+		const normalized = hex.replace("#", "").trim();
+		if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return "#111827";
+		const r = Number.parseInt(normalized.slice(0, 2), 16);
+		const g = Number.parseInt(normalized.slice(2, 4), 16);
+		const b = Number.parseInt(normalized.slice(4, 6), 16);
+		const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+		return brightness > 150 ? "#111827" : "#ffffff";
+	}
+
+	async function loadCurrentLugColors(userId: string) {
+		if (!userId) {
+			setCurrentLugPrimaryColor("#025080");
+			setCurrentLugSecondaryColor("#e11d48");
+			setCurrentLugAccentColor("#5aa5d3");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", userId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugPrimaryColor("#025080");
+				setCurrentLugSecondaryColor("#e11d48");
+				setCurrentLugAccentColor("#5aa5d3");
+				return;
+			}
+
+			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugPrimaryColor("#025080");
+				setCurrentLugSecondaryColor("#e11d48");
+				setCurrentLugAccentColor("#5aa5d3");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase
+				.from("lugs")
+				.select("primary_color,secondary_color,accent_color")
+				.eq("id", selected.lug_id)
+				.maybeSingle();
+			if (lugError) {
+				setCurrentLugPrimaryColor("#025080");
+				setCurrentLugSecondaryColor("#e11d48");
+				setCurrentLugAccentColor("#5aa5d3");
+				return;
+			}
+
+			const lugRecord = (lug as Record<string, unknown> | null) ?? null;
+			setCurrentLugPrimaryColor(normalizeHexColor(String(lugRecord?.primary_color ?? ""), "#025080"));
+			setCurrentLugSecondaryColor(normalizeHexColor(String(lugRecord?.secondary_color ?? ""), "#e11d48"));
+			setCurrentLugAccentColor(normalizeHexColor(String(lugRecord?.accent_color ?? ""), "#5aa5d3"));
+		} catch {
+			setCurrentLugPrimaryColor("#025080");
+			setCurrentLugSecondaryColor("#e11d48");
+			setCurrentLugAccentColor("#5aa5d3");
+		}
 	}
 
 	async function loadMissingPartImages(items: PartImageRequestItem[]) {
@@ -327,6 +401,7 @@ export default function MinifigurasPage() {
 				} = await supabase.auth.getUser();
 
 				if (!mounted || !user) return;
+				await loadCurrentLugColors(user.id);
 
 				const canAccessMinifiguras = await canAccessModule(supabase, user.email, "minifiguras");
 				if (!canAccessMinifiguras) {
@@ -1190,6 +1265,13 @@ export default function MinifigurasPage() {
 		const shouldShowMissingCountTile = totalMissingCount > 3;
 		const imagePreviewParts = shouldShowMissingCountTile ? missingPreview.slice(0, 2) : missingPreview;
 		const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
+		const ownedDarkColor = normalizeHexColor(currentLugPrimaryColor, "#025080");
+		const ownedMissingColor = normalizeHexColor(currentLugAccentColor, "#5aa5d3");
+		const favoriteColor = normalizeHexColor(currentLugSecondaryColor, "#e11d48");
+		const cardBackgroundColor = cardTone === "owned-dark" ? ownedDarkColor : cardTone === "owned-light" ? ownedMissingColor : "#ffffff";
+		const cardBorderColor = cardTone === "base" ? "#e2e8f0" : cardBackgroundColor;
+		const cardTextColor = cardTone === "base" ? "#0f172a" : getTextColorForBackground(cardBackgroundColor);
+		const cardSecondaryTextColor = cardTone === "base" ? "#64748b" : cardTextColor;
 		const imageContainerClass = hasMissingPieces
 			? "relative h-[160px] overflow-hidden rounded-md bg-white"
 			: "relative aspect-square overflow-hidden rounded-md bg-white";
@@ -1197,20 +1279,18 @@ export default function MinifigurasPage() {
 			? "absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow"
 			: "absolute right-1 top-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow";
 		const favoriteIconClass = hasMissingPieces
-			? `h-5 w-5 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`
-			: `h-7 w-7 ${isFavoriteFigure ? "text-rose-500" : "text-slate-400"}`;
+			? "h-5 w-5"
+			: "h-7 w-7";
 		const mainImageClass = hasMissingPieces ? "h-full w-full object-contain p-1" : "h-full w-full object-contain";
 
 		return (
 			<article
 				key={`${figure.themeId}:${figure.name}`}
-				className={`rounded-lg border p-1 ${
-					cardTone === "owned-dark"
-						? "border-[#025080] bg-[#025080]"
-						: cardTone === "owned-light"
-							? "border-[#5aa5d3] bg-[#5aa5d3]"
-							: "border-slate-200 bg-white"
-				}`}
+				className="rounded-lg border p-1"
+				style={{
+					borderColor: cardBorderColor,
+					backgroundColor: cardBackgroundColor,
+				}}
 			>
 				<div className={imageContainerClass}>
 					<button
@@ -1222,6 +1302,7 @@ export default function MinifigurasPage() {
 						<svg
 							viewBox="0 0 24 24"
 							className={favoriteIconClass}
+							style={{ color: isFavoriteFigure ? favoriteColor : "#94a3b8" }}
 							fill={isFavoriteFigure ? "currentColor" : "none"}
 							stroke="currentColor"
 							strokeWidth="1.7"
@@ -1243,8 +1324,12 @@ export default function MinifigurasPage() {
 						<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
 					)}
 				</div>
-				<p className={`mt-1 line-clamp-2 text-[10px] font-medium ${cardTone === "base" ? "text-slate-900" : "text-blue-50"}`}>{figure.name}</p>
-				<p className={`mt-0.5 text-[9px] ${cardTone === "base" ? "text-slate-500" : "text-blue-200"}`}>{figure.themeName}</p>
+				<p className="mt-1 line-clamp-2 text-[10px] font-medium" style={{ color: cardTextColor }}>
+					{figure.name}
+				</p>
+				<p className="mt-0.5 text-[9px]" style={{ color: cardSecondaryTextColor, opacity: 0.9 }}>
+					{figure.themeName}
+				</p>
 				{hasMissingPieces && missingPreview.length > 0 ? (
 					<div className="mt-1 grid grid-cols-3 gap-1">
 						{imagePreviewParts.map((part, index) => {
@@ -1276,7 +1361,7 @@ export default function MinifigurasPage() {
 					</div>
 				) : null}
 				<div className="mt-1 flex items-center justify-between gap-1">
-					<label className={`flex cursor-pointer items-center gap-1 text-[10px] ${cardTone === "base" ? "text-slate-700" : "text-blue-50"}`}>
+					<label className="flex cursor-pointer items-center gap-1 text-[10px]" style={{ color: cardTone === "base" ? "#334155" : cardTextColor }}>
 						<input type="checkbox" checked={isOwned} onChange={() => toggleOwned(figure.themeId, figure.name)} className="h-3 w-3 rounded border-slate-300" />
 						<span>Lo tengo</span>
 					</label>
@@ -1284,7 +1369,15 @@ export default function MinifigurasPage() {
 						type="button"
 						onClick={() => void openPartsModal({ name: figure.name, setNum: figure.setNum, figureKey: figure.figureKey })}
 						disabled={!figure.setNum}
-						className={`rounded-md border px-1 py-0.5 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${cardTone === "base" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : "border-blue-300 text-blue-50 hover:bg-blue-800"}`}
+						className={`rounded-md border px-1 py-0.5 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${cardTone === "base" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : ""}`}
+						style={
+							cardTone === "base"
+								? undefined
+								: {
+									borderColor: cardTextColor,
+									color: cardTextColor,
+								}
+						}
 					>
 						Piezas
 					</button>

@@ -58,6 +58,7 @@ export default function PoolPage() {
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 	const [currentUserName, setCurrentUserName] = useState<string>("Usuario");
+	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
@@ -75,6 +76,44 @@ export default function PoolPage() {
 	function isSaleListName(listName: string | null | undefined) {
 		const normalized = String(listName ?? "").trim().toLowerCase();
 		return normalized.startsWith(SALE_LIST_PREFIX);
+	}
+
+	async function loadCurrentLugLogo(userId: string) {
+		if (!userId) {
+			setCurrentLugLogoUrl("");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", userId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url").eq("id", selected.lug_id).maybeSingle();
+			if (lugError) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
+		} catch {
+			setCurrentLugLogoUrl("");
+		}
 	}
 
 	useEffect(() => {
@@ -110,6 +149,7 @@ export default function PoolPage() {
 					(user.user_metadata?.full_name as string) ||
 					(user.email?.split("@")[0] ?? "Usuario"),
 			);
+			await loadCurrentLugLogo(user.id);
 
 
 				const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_pool_lots");
@@ -423,7 +463,11 @@ export default function PoolPage() {
 									</h1>
 									<p className="mt-1 text-sm font-semibold text-slate-700">{currentUserName}</p>
 								</div>
-								<Image src="/pool-logo.svg" alt="Pool" width={72} height={20} className="shrink-0 sm:hidden" />
+								{currentLugLogoUrl ? (
+									<img src={currentLugLogoUrl} alt="Logo LUG" className="h-16 w-auto max-w-[192px] shrink-0 object-contain sm:hidden" />
+								) : (
+									<Image src="/pool-logo.svg" alt="Pool" width={144} height={40} className="shrink-0 sm:hidden" />
+								)}
 							</div>
 
 							<div className="mt-1 flex items-center gap-2 sm:mt-0">
@@ -459,7 +503,11 @@ export default function PoolPage() {
 								</label>
 							</div>
 						</div>
-						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />
+						{currentLugLogoUrl ? (
+							<img src={currentLugLogoUrl} alt="Logo LUG" className="hidden h-24 w-auto max-w-[440px] shrink-0 self-start object-contain sm:block sm:self-auto" />
+						) : (
+							<Image src="/pool-logo.svg" alt="Pool" width={240} height={68} className="hidden shrink-0 self-start sm:block sm:self-auto" />
+						)}
 					</div>
 				</header>
 

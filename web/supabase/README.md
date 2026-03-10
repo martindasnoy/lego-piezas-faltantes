@@ -34,6 +34,12 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
     - Crea tabla de ranking por pieza (`set_count`) para ordenar sugerencias del desplegable por popularidad.
 16. `minifig_parts_cache.sql`
     - Crea tabla para cachear en DB las partes por minifigura (`set_num`) y servir `/api/rebrickable/minifigures/parts` sin depender de Rebrickable en runtime.
+17. `lugs_phase1.sql`
+    - Fase 1 de comunidades LUG: crea `lugs`, `lug_memberships`, agrega `lists.lug_id` y migra listas existentes al LUG default (`balug`).
+18. `lugs_phase2_rls_rpc.sql`
+    - Fase 2 de comunidades LUG: aplica aislamiento por `lug_id` en RLS y RPCs de pool/ofertas/matches, con helper para asignar `lug_id` por defecto al crear listas.
+19. `lugs_phase3_profile_fields.sql`
+    - Fase 3 de comunidades LUG: agrega columnas `country`, `description` y `color_4` en `lugs` para guardar el perfil completo desde panel LUG admin.
 
 ## Verificacion rapida
 

@@ -44,11 +44,50 @@ export default function PoolVentaPage() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario" | "valor_asc" | "valor_desc">("pieza");
 	const [showOwnLots, setShowOwnLots] = useState(false);
 	const [lotsPage, setLotsPage] = useState(1);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+
+	async function loadCurrentLugLogo(userId: string) {
+		if (!userId) {
+			setCurrentLugLogoUrl("");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", userId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url").eq("id", selected.lug_id).maybeSingle();
+			if (lugError) {
+				setCurrentLugLogoUrl("");
+				return;
+			}
+
+			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
+		} catch {
+			setCurrentLugLogoUrl("");
+		}
+	}
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -72,6 +111,7 @@ export default function PoolVentaPage() {
 				}
 
 				setCurrentUserId(user.id);
+				await loadCurrentLugLogo(user.id);
 
 				const canAccessPoolSale = await canAccessModule(supabase, user.email, "poolSale");
 				if (!canAccessPoolSale) {
@@ -288,7 +328,14 @@ export default function PoolVentaPage() {
 							← Volver
 						</Link>
 						<div>
-							<h1 className="text-3xl font-semibold text-slate-900">Pool de items a la venta</h1>
+							<div className="flex items-start justify-between gap-2">
+								<h1 className="text-3xl font-semibold text-slate-900">Pool de items a la venta</h1>
+								{currentLugLogoUrl ? (
+									<img src={currentLugLogoUrl} alt="Logo LUG" className="h-16 w-auto max-w-[192px] shrink-0 object-contain sm:hidden" />
+								) : (
+									<Image src="/pool-logo.svg" alt="Pool" width={144} height={40} className="shrink-0 sm:hidden" />
+								)}
+							</div>
 							<div className="mt-2 flex items-center gap-2">
 								<label htmlFor="pool-venta-sort" className="text-sm text-slate-700">
 									Ordenar por
@@ -310,7 +357,11 @@ export default function PoolVentaPage() {
 								</label>
 							</div>
 						</div>
-						<Image src="/pool-logo.svg" alt="Pool" width={120} height={34} className="hidden shrink-0 self-start sm:block sm:self-auto" />
+						{currentLugLogoUrl ? (
+							<img src={currentLugLogoUrl} alt="Logo LUG" className="hidden h-24 w-auto max-w-[440px] shrink-0 self-start object-contain sm:block sm:self-auto" />
+						) : (
+							<Image src="/pool-logo.svg" alt="Pool" width={240} height={68} className="hidden shrink-0 self-start sm:block sm:self-auto" />
+						)}
 					</div>
 				</header>
 

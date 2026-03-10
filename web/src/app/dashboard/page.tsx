@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -104,6 +104,24 @@ type CachedImageRow = {
 	updated_at: string;
 };
 
+type LugMembershipRow = {
+	lug_id: string;
+	role: "admin" | "member";
+	joined_at: string;
+};
+
+type LugProfile = {
+	id: string;
+	name: string;
+	logo_url: string;
+	country: string;
+	description: string;
+	color_1: string;
+	color_2: string;
+	color_3: string;
+	color_4: string;
+};
+
 type MinifigStatsPayload = {
 	themes_count: number;
 	figures_count: number;
@@ -147,9 +165,13 @@ export default function DashboardPage() {
 	const router = useRouter();
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
 	const [userEmail, setUserEmail] = useState("");
+	const [userId, setUserId] = useState("");
 	const [displayName, setDisplayName] = useState("");
 	const [socialPlatform, setSocialPlatform] = useState<"instagram" | "facebook" | "">("instagram");
 	const [socialHandle, setSocialHandle] = useState("");
+	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
+	const [currentLugName, setCurrentLugName] = useState("");
+	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#0093DD");
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [showMasterModal, setShowMasterModal] = useState(false);
 	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
@@ -194,6 +216,23 @@ export default function DashboardPage() {
 	const [settingsEmailInput, setSettingsEmailInput] = useState("");
 	const [settingsSocialPlatform, setSettingsSocialPlatform] = useState<"instagram" | "facebook" | "">("instagram");
 	const [settingsSocialHandle, setSettingsSocialHandle] = useState("");
+	const [settingsLugName, setSettingsLugName] = useState("Sin LUG asignado");
+	const [settingsLugId, setSettingsLugId] = useState("");
+	const [settingsLugRole, setSettingsLugRole] = useState<"admin" | "member" | null>(null);
+	const [settingsLugLoading, setSettingsLugLoading] = useState(false);
+	const [showLugModal, setShowLugModal] = useState(false);
+	const [lugSaving, setLugSaving] = useState(false);
+	const [lugProfile, setLugProfile] = useState<LugProfile>({
+		id: "",
+		name: "",
+		logo_url: "",
+		country: "",
+		description: "",
+		color_1: "#006eb2",
+		color_2: "#f7c948",
+		color_3: "#111827",
+		color_4: "#ffffff",
+	});
 	const [selectedFace, setSelectedFace] = useState(1);
 	const [showPasswordModal, setShowPasswordModal] = useState(false);
 	const [currentPasswordInput, setCurrentPasswordInput] = useState("");
@@ -336,6 +375,7 @@ export default function DashboardPage() {
 				}
 
 				setUserEmail(user.email ?? "");
+				setUserId(user.id);
 				const normalizedEmail = (user.email ?? "").trim().toLowerCase();
 				const isMaster = normalizedEmail === MASTER_EMAIL;
 				setIsMasterUser(isMaster);
@@ -349,6 +389,7 @@ export default function DashboardPage() {
 				setSocialHandle(metadataSocialHandle);
 				const storedFace = Number(user.user_metadata?.minifig_face ?? 1);
 				setSelectedFace(normalizeFaceValue(storedFace));
+				await loadCurrentLugBranding(user.id);
 				await loadLists(user.id);
 			} catch (error) {
 				const text = error instanceof Error ? error.message : "No se pudo abrir el dashboard.";
@@ -950,17 +991,237 @@ export default function DashboardPage() {
 		}
 	}
 
+	async function loadUserLugLabel(targetUserId: string) {
+		if (!targetUserId) {
+			setSettingsLugName("No disponible");
+			setSettingsLugRole(null);
+			setSettingsLugId("");
+			return;
+		}
+
+		setSettingsLugLoading(true);
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", targetUserId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setSettingsLugName("No disponible");
+				setSettingsLugRole(null);
+				setSettingsLugId("");
+				return;
+			}
+
+			const rows = ((memberships as LugMembershipRow[] | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setSettingsLugName("Sin LUG asignado");
+				setSettingsLugRole(null);
+				setSettingsLugId("");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("*").eq("id", selected.lug_id).maybeSingle();
+
+			if (lugError) {
+				setSettingsLugName("No disponible");
+				setSettingsLugRole(null);
+				setSettingsLugId("");
+				return;
+			}
+
+			const createdBy = String((lug as Record<string, unknown> | null)?.created_by ?? "").trim();
+			const isLugAdmin =
+				selected.role === "admin" && (createdBy.toLowerCase() === targetUserId.toLowerCase() || userEmail.trim().toLowerCase() === MASTER_EMAIL);
+			const roleText = isLugAdmin ? "Admin" : "Miembro";
+			const lugName = String(lug?.name ?? "LUG sin nombre").trim() || "LUG sin nombre";
+			setSettingsLugName(`${lugName} (${roleText})`);
+			setSettingsLugRole(isLugAdmin ? "admin" : "member");
+			setSettingsLugId(String(selected.lug_id));
+			setLugProfile({
+				id: String(selected.lug_id),
+				name: lugName,
+				logo_url: String((lug as Record<string, unknown> | null)?.logo_url ?? ""),
+				country: String((lug as Record<string, unknown> | null)?.country ?? ""),
+				description: String((lug as Record<string, unknown> | null)?.description ?? ""),
+				color_1: String((lug as Record<string, unknown> | null)?.primary_color ?? "#006eb2") || "#006eb2",
+				color_2: String((lug as Record<string, unknown> | null)?.secondary_color ?? "#f7c948") || "#f7c948",
+				color_3: String((lug as Record<string, unknown> | null)?.accent_color ?? "#111827") || "#111827",
+				color_4: String((lug as Record<string, unknown> | null)?.color_4 ?? "#ffffff") || "#ffffff",
+			});
+		} catch {
+			setSettingsLugName("No disponible");
+			setSettingsLugRole(null);
+			setSettingsLugId("");
+		} finally {
+			setSettingsLugLoading(false);
+		}
+	}
+
+	async function loadCurrentLugBranding(targetUserId: string) {
+		if (!targetUserId) {
+			setCurrentLugLogoUrl("");
+			setCurrentLugName("");
+			setCurrentLugPrimaryColor("#0093DD");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", targetUserId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugLogoUrl("");
+				setCurrentLugName("");
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			const rows = ((memberships as LugMembershipRow[] | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugLogoUrl("");
+				setCurrentLugName("");
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("name,logo_url,primary_color").eq("id", selected.lug_id).maybeSingle();
+
+			if (lugError) {
+				setCurrentLugLogoUrl("");
+				setCurrentLugName("");
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
+			setCurrentLugName(String((lug as Record<string, unknown> | null)?.name ?? "").trim());
+			setCurrentLugPrimaryColor(String((lug as Record<string, unknown> | null)?.primary_color ?? "#0093DD") || "#0093DD");
+		} catch {
+			setCurrentLugLogoUrl("");
+			setCurrentLugName("");
+			setCurrentLugPrimaryColor("#0093DD");
+		}
+	}
+
+	function openLugSettingsModal() {
+		if (!settingsLugId) {
+			setMessage("No tienes LUG asignado.");
+			return;
+		}
+		setShowLugModal(true);
+	}
+
+	async function saveLugProfile() {
+		if (settingsLugRole !== "admin" || !lugProfile.id) return;
+		setLugSaving(true);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+			let fallbackWithoutExtraFields = false;
+			const fullPayload = {
+				name: lugProfile.name.trim(),
+				logo_url: lugProfile.logo_url.trim() || null,
+				country: lugProfile.country.trim() || null,
+				description: lugProfile.description.trim() || null,
+				primary_color: lugProfile.color_1.trim() || null,
+				secondary_color: lugProfile.color_2.trim() || null,
+				accent_color: lugProfile.color_3.trim() || null,
+				color_4: lugProfile.color_4.trim() || null,
+			};
+
+			let { error } = await supabase.from("lugs").update(fullPayload).eq("id", lugProfile.id);
+
+			if (error && /column/i.test(error.message)) {
+				fallbackWithoutExtraFields = true;
+				const basicPayload = {
+					name: lugProfile.name.trim(),
+					logo_url: lugProfile.logo_url.trim() || null,
+					primary_color: lugProfile.color_1.trim() || null,
+					secondary_color: lugProfile.color_2.trim() || null,
+					accent_color: lugProfile.color_3.trim() || null,
+				};
+				({ error } = await supabase.from("lugs").update(basicPayload).eq("id", lugProfile.id));
+			}
+
+			if (error) {
+				setMessage(`No se pudo guardar LUG: ${error.message}`);
+				return;
+			}
+
+			await loadUserLugLabel(userId);
+			await loadCurrentLugBranding(userId);
+			setShowLugModal(false);
+			setMessage(
+				fallbackWithoutExtraFields
+					? "LUG guardado parcialmente: falta migrar columnas de pais/descripcion/color_4 en la tabla lugs."
+					: "Configuracion del LUG guardada.",
+			);
+		} finally {
+			setLugSaving(false);
+		}
+	}
+
+	async function handleLugLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		try {
+			const dataUrl = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(String(reader.result ?? ""));
+				reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+				reader.readAsDataURL(file);
+			});
+
+			const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+				const image = new window.Image();
+				image.onload = () => resolve({ width: image.width, height: image.height });
+				image.onerror = () => reject(new Error("Formato de imagen invalido."));
+				image.src = dataUrl;
+			});
+
+			if (dimensions.width > 500 || dimensions.height > 500) {
+				setMessage("La imagen del LUG debe ser de hasta 500x500.");
+				return;
+			}
+
+			setLugProfile((current) => ({ ...current, logo_url: dataUrl }));
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "No se pudo cargar la imagen del LUG.");
+		} finally {
+			event.target.value = "";
+		}
+	}
+
+	function changeLug() {
+		setMessage("Cambio de LUG: lo hacemos en el siguiente paso del onboarding.");
+	}
+
 	function openUserSettings() {
 		setSettingsNameInput(displayName || "");
 		setSettingsEmailInput(userEmail || "");
 		setSettingsSocialPlatform(socialPlatform || "instagram");
 		setSettingsSocialHandle(socialHandle || "");
+		setSettingsLugName("Sin LUG asignado");
+		setSettingsLugId("");
+		setSettingsLugRole(null);
 		setSelectedFace((current) => normalizeFaceValue(current));
 		setShowPasswordModal(false);
 		setCurrentPasswordInput("");
 		setNewPasswordInput("");
 		setNewPasswordConfirmInput("");
 		setShowUserSettings(true);
+		void loadUserLugLabel(userId);
 	}
 
 	function openPasswordSettings() {
@@ -1349,7 +1610,7 @@ export default function DashboardPage() {
 								wishLists.map((list) => renderListItem(list))
 							)}
 
-							<li className="rounded-lg border border-[#007bb8] bg-[#0093DD] px-4 py-3 text-white">
+							<li className="rounded-lg px-4 py-3 text-white" style={{ backgroundColor: currentLugPrimaryColor, border: `1px solid ${currentLugPrimaryColor}` }}>
 								<div className="flex items-start justify-between gap-3">
 									<div>
 										<Link href="/dashboard/offered" className="text-base font-semibold hover:underline">
@@ -1381,7 +1642,11 @@ export default function DashboardPage() {
 					<div className="flex flex-col gap-4">
 						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
 							<div className="flex justify-center">
-								<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
+								{currentLugLogoUrl ? (
+									<img src={currentLugLogoUrl} alt={currentLugName ? `Logo ${currentLugName}` : "Logo LUG"} className="h-32 w-auto max-w-[420px] object-contain" />
+								) : (
+									<Image src="/pool-logo.svg" alt="Pool" width={160} height={44} />
+								)}
 							</div>
 							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
 							<div className="mt-4 flex flex-col items-center gap-2">
@@ -1390,7 +1655,7 @@ export default function DashboardPage() {
 									onClick={() => void openBalugMembersModal()}
 									className="inline-flex h-10 w-[90%] items-center justify-center rounded-lg border border-black bg-black px-4 text-sm font-semibold text-white hover:bg-slate-800"
 								>
-									Intergrantes Balug
+									Integrantes del LUG
 								</button>
 								{showPoolWantedModule ? (
 									<div className="group relative flex w-full justify-center">
@@ -1789,7 +2054,7 @@ export default function DashboardPage() {
 					<div className="fixed inset-0 z-[54] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowBalugMembersModal(false)}>
 						<div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
 							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
-								<h3 className="text-xl font-semibold text-slate-900">Integrantes BALUG ({balugMembers.length})</h3>
+							<h3 className="text-xl font-semibold text-slate-900">Integrantes del LUG ({balugMembers.length})</h3>
 								<button
 									type="button"
 									onClick={() => setShowBalugMembersModal(false)}
@@ -1871,7 +2136,7 @@ export default function DashboardPage() {
 								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
 							/>
 							<label className="mt-3 block text-sm text-slate-700" htmlFor="settingsEmail">
-								Email
+								Mail
 							</label>
 							<input
 								id="settingsEmail"
@@ -1880,6 +2145,14 @@ export default function DashboardPage() {
 								onChange={(event) => setSettingsEmailInput(event.target.value)}
 								className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
 							/>
+							<button
+								type="button"
+								onClick={openPasswordSettings}
+								className="mt-3 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+							>
+								Cambiar contrasena
+							</button>
+							<label className="mt-3 block text-sm text-slate-700">Red social</label>
 							<div className="mt-3 grid grid-cols-[140px_minmax(0,1fr)] gap-2">
 								<select
 									value={settingsSocialPlatform}
@@ -1897,14 +2170,22 @@ export default function DashboardPage() {
 									className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
 								/>
 							</div>
+							<label className="mt-3 block text-sm text-slate-700">LUG</label>
 							<button
 								type="button"
-								onClick={openPasswordSettings}
-								className="mt-3 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+								onClick={openLugSettingsModal}
+								disabled={settingsLugLoading}
+								className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50"
 							>
-								Cambiar contrasena
+								{settingsLugLoading
+									? "Cargando LUG..."
+									: settingsLugRole === "admin"
+										? "LUG (admin)"
+										: "LUG"}
 							</button>
-							<div className="mt-4 grid grid-cols-4 gap-2">
+							<p className="mt-1 text-xs text-slate-500">{settingsLugName}</p>
+							<label className="mt-3 block text-sm text-slate-700">Thumbnail</label>
+							<div className="mt-4 grid grid-cols-5 gap-1.5">
 								{Array.from({ length: FACE_TOTAL }, (_, index) => {
 									const faceNum = index + 1;
 									const isSelected = selectedFace === faceNum;
@@ -1913,7 +2194,7 @@ export default function DashboardPage() {
 											key={`slot-${faceNum}`}
 											type="button"
 											onClick={() => setSelectedFace(faceNum)}
-											className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border p-1 ${isSelected ? "border-[#006eb2] bg-[#cfeeff]" : "border-slate-200 bg-slate-50"}`}
+											className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border p-0.5 ${isSelected ? "border-[#006eb2] bg-[#cfeeff]" : "border-slate-200 bg-slate-50"}`}
 										>
 											<img src={getFaceImagePath(faceNum)} alt={`Cara minifig ${faceNum}`} className="h-full w-full object-contain" />
 										</button>
@@ -1939,6 +2220,108 @@ export default function DashboardPage() {
 									className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
 								>
 									{settingsSaving ? "Guardando..." : "Guardar"}
+								</button>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showLugModal ? (
+					<div className="fixed inset-0 z-[59] flex items-center justify-center bg-slate-900/55 p-4">
+						<div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+							<h3 className="text-xl text-slate-900">{settingsLugRole === "admin" ? "LUG (admin)" : "LUG"}</h3>
+							{settingsLugRole === "admin" ? (
+								<>
+									<div className="mt-3">
+										<p className="text-sm text-slate-700">Logo del LUG (hasta 500x500)</p>
+										<input
+											type="file"
+											accept="image/*"
+											onChange={(event) => void handleLugLogoFileChange(event)}
+											className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-slate-50 file:px-3 file:py-1.5 file:text-xs file:text-slate-700"
+										/>
+									</div>
+									{lugProfile.logo_url ? (
+										<div className="mt-2 flex justify-center">
+											<img src={lugProfile.logo_url} alt="Logo LUG" className="h-20 w-20 rounded border border-slate-300 object-contain bg-white" />
+										</div>
+									) : null}
+									<label className="mt-3 block text-sm text-slate-700">Nombre</label>
+									<input
+										type="text"
+										value={lugProfile.name}
+										onChange={(event) => setLugProfile((current) => ({ ...current, name: event.target.value }))}
+										className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+									/>
+									<label className="mt-3 block text-sm text-slate-700">Pais</label>
+									<input
+										type="text"
+										value={lugProfile.country}
+										onChange={(event) => setLugProfile((current) => ({ ...current, country: event.target.value }))}
+										className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+									/>
+									<label className="mt-3 block text-sm text-slate-700">Descripcion general</label>
+									<textarea
+										value={lugProfile.description}
+										onChange={(event) => setLugProfile((current) => ({ ...current, description: event.target.value }))}
+										rows={3}
+										className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-slate-500"
+									/>
+									<p className="mt-3 text-sm text-slate-700">Colores</p>
+									<div className="mt-1 space-y-2">
+										<div className="flex items-center gap-2">
+											<input type="color" value={lugProfile.color_1} onChange={(event) => setLugProfile((current) => ({ ...current, color_1: event.target.value }))} title="Color 1" className="h-9 w-9 cursor-pointer rounded border border-slate-300 bg-transparent p-0" />
+											<input type="text" value={lugProfile.color_1} onChange={(event) => setLugProfile((current) => ({ ...current, color_1: event.target.value }))} placeholder="#ffffff" className="h-9 w-28 rounded border border-slate-300 px-2 text-xs text-slate-900 outline-none focus:border-slate-500" />
+											<input type="color" value={lugProfile.color_2} onChange={(event) => setLugProfile((current) => ({ ...current, color_2: event.target.value }))} title="Color 2" className="h-9 w-9 cursor-pointer rounded border border-slate-300 bg-transparent p-0" />
+											<input type="text" value={lugProfile.color_2} onChange={(event) => setLugProfile((current) => ({ ...current, color_2: event.target.value }))} placeholder="#ffffff" className="h-9 w-28 rounded border border-slate-300 px-2 text-xs text-slate-900 outline-none focus:border-slate-500" />
+										</div>
+										<div className="flex items-center gap-2">
+											<input type="color" value={lugProfile.color_3} onChange={(event) => setLugProfile((current) => ({ ...current, color_3: event.target.value }))} title="Color 3" className="h-9 w-9 cursor-pointer rounded border border-slate-300 bg-transparent p-0" />
+											<input type="text" value={lugProfile.color_3} onChange={(event) => setLugProfile((current) => ({ ...current, color_3: event.target.value }))} placeholder="#ffffff" className="h-9 w-28 rounded border border-slate-300 px-2 text-xs text-slate-900 outline-none focus:border-slate-500" />
+											<input type="color" value={lugProfile.color_4} onChange={(event) => setLugProfile((current) => ({ ...current, color_4: event.target.value }))} title="Color 4" className="h-9 w-9 cursor-pointer rounded border border-slate-300 bg-transparent p-0" />
+											<input type="text" value={lugProfile.color_4} onChange={(event) => setLugProfile((current) => ({ ...current, color_4: event.target.value }))} placeholder="#ffffff" className="h-9 w-28 rounded border border-slate-300 px-2 text-xs text-slate-900 outline-none focus:border-slate-500" />
+										</div>
+										<p className="text-[11px] text-slate-500">Puedes usar paleta o escribir codigo hexadecimal (ej: #ffffff).</p>
+									</div>
+								</>
+							) : (
+								<div className="mt-3 space-y-2 rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+									{lugProfile.logo_url ? (
+										<div className="flex justify-center pb-1">
+											<img src={lugProfile.logo_url} alt="Logo LUG" className="h-40 w-40 rounded border border-slate-300 object-contain bg-white" />
+										</div>
+									) : null}
+									<p><span className="font-semibold">Nombre:</span> {lugProfile.name || "-"}</p>
+									<p><span className="font-semibold">Pais:</span> {lugProfile.country || "-"}</p>
+									<p><span className="font-semibold">Descripcion:</span> {lugProfile.description || "-"}</p>
+								</div>
+							)}
+
+							<div className="mt-4 flex justify-end gap-2">
+								{settingsLugRole === "admin" ? (
+									<button
+										type="button"
+										onClick={() => void saveLugProfile()}
+										disabled={lugSaving}
+										className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+									>
+										{lugSaving ? "Guardando..." : "Guardar"}
+									</button>
+								) : (
+									<button
+										type="button"
+										onClick={changeLug}
+										className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
+									>
+										Cambiar de LUG
+									</button>
+								)}
+								<button
+									type="button"
+									onClick={() => setShowLugModal(false)}
+									className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
 								</button>
 							</div>
 						</div>

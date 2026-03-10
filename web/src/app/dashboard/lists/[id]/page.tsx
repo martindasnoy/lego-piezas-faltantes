@@ -135,6 +135,8 @@ export default function ListDetailPage() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [currentUserName, setCurrentUserName] = useState("");
 	const [currentUserEmail, setCurrentUserEmail] = useState("");
+	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#006eb2");
+	const [currentLugSecondaryColor, setCurrentLugSecondaryColor] = useState("#006eb2");
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
 	const [showImportExportModal, setShowImportExportModal] = useState(false);
 	const [importExportMode, setImportExportMode] = useState<"import" | "export">("export");
@@ -169,6 +171,50 @@ export default function ListDetailPage() {
 		"X2",
 		"X3",
 	] as const;
+
+	async function loadCurrentLugColor(userId: string) {
+		if (!userId) {
+			setCurrentLugPrimaryColor("#006eb2");
+			setCurrentLugSecondaryColor("#006eb2");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", userId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugPrimaryColor("#006eb2");
+				setCurrentLugSecondaryColor("#006eb2");
+				return;
+			}
+
+			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugPrimaryColor("#006eb2");
+				setCurrentLugSecondaryColor("#006eb2");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("primary_color,secondary_color").eq("id", selected.lug_id).maybeSingle();
+			if (lugError) {
+				setCurrentLugPrimaryColor("#006eb2");
+				setCurrentLugSecondaryColor("#006eb2");
+				return;
+			}
+
+			setCurrentLugPrimaryColor(String((lug as Record<string, unknown> | null)?.primary_color ?? "#006eb2") || "#006eb2");
+			setCurrentLugSecondaryColor(String((lug as Record<string, unknown> | null)?.secondary_color ?? "#006eb2") || "#006eb2");
+		} catch {
+			setCurrentLugPrimaryColor("#006eb2");
+			setCurrentLugSecondaryColor("#006eb2");
+		}
+	}
 
 	const totals = useMemo(() => {
 		return lots.reduce(
@@ -437,6 +483,7 @@ export default function ListDetailPage() {
 
 				setCurrentUserName(resolvedUserName);
 				setCurrentUserEmail((user.email ?? "").trim());
+				await loadCurrentLugColor(user.id);
 
 				const { data: listData, error: listError } = await supabase
 					.from("lists")
@@ -1597,7 +1644,8 @@ export default function ListDetailPage() {
 							<button
 								type="button"
 								onClick={() => void openCatalogModal()}
-								className="w-full rounded-md bg-[#006eb2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#005f9a] sm:w-auto"
+								className="w-full rounded-md px-3 py-1.5 text-sm font-semibold text-white hover:opacity-95 sm:w-auto"
+								style={{ backgroundColor: currentLugPrimaryColor }}
 							>
 								Por Catálogo
 							</button>
@@ -1741,8 +1789,9 @@ export default function ListDetailPage() {
 												value={valueInput}
 												onChange={(event) => setValueInput(event.target.value)}
 												placeholder="0"
-												className="w-full rounded-lg border border-[#005f9a] bg-[#006eb2] py-2 pl-5 pr-2 text-center font-bold text-white outline-none transition focus:border-[#006eb2] focus:ring-2 focus:ring-blue-200 placeholder:text-white/70"
-											/>
+											className="w-full rounded-lg py-2 pl-5 pr-2 text-center font-bold text-white outline-none transition placeholder:text-white/70"
+											style={{ backgroundColor: currentLugSecondaryColor, border: `1px solid ${currentLugSecondaryColor}` }}
+										/>
 										</div>
 									) : null}
 									<div className="w-24">
@@ -1775,7 +1824,8 @@ export default function ListDetailPage() {
 						setImportExportMode("export");
 						setShowImportExportModal(true);
 					}}
-					className="w-full rounded-xl border border-[#006eb2] bg-[#006eb2] px-4 py-3 text-sm font-semibold text-white hover:bg-[#005f9a]"
+					className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white hover:opacity-95"
+					style={{ backgroundColor: currentLugPrimaryColor, border: `1px solid ${currentLugPrimaryColor}` }}
 				>
 					Exportar
 				</button>
@@ -1938,8 +1988,9 @@ export default function ListDetailPage() {
 														}}
 														disabled={updatingLotValueId === lot.id}
 														placeholder="0"
-														className="w-full rounded border border-[#005f9a] bg-[#006eb2] py-0.5 pl-4 pr-1 text-center text-xs font-bold text-white disabled:opacity-50 sm:px-2 sm:py-1 sm:pl-5 sm:text-sm placeholder:text-white/70"
-													/>
+													className="w-full rounded py-0.5 pl-4 pr-1 text-center text-xs font-bold text-white disabled:opacity-50 sm:px-2 sm:py-1 sm:pl-5 sm:text-sm placeholder:text-white/70"
+													style={{ backgroundColor: currentLugSecondaryColor, border: `1px solid ${currentLugSecondaryColor}` }}
+												/>
 												</div>
 											) : null}
 											</div>
@@ -1984,8 +2035,9 @@ export default function ListDetailPage() {
 															}}
 															disabled={updatingLotValueId === lot.id}
 															placeholder="0"
-															className="w-full rounded border border-[#005f9a] bg-[#006eb2] py-1 pl-5 pr-2 text-center text-sm font-bold text-white disabled:opacity-50 placeholder:text-white/70"
-														/>
+														className="w-full rounded py-1 pl-5 pr-2 text-center text-sm font-bold text-white disabled:opacity-50 placeholder:text-white/70"
+														style={{ backgroundColor: currentLugSecondaryColor, border: `1px solid ${currentLugSecondaryColor}` }}
+													/>
 													</div>
 												) : null}
 											</div>
