@@ -10,6 +10,9 @@ import { normalizeColorName, buildCacheKey, upsertCachedImages } from "@/lib/ima
 import { normalizeMinifigColorName, upsertMinifigParts } from "@/lib/minifig-parts-db";
 
 const DEFAULT_BATCH_SIZE = 8;
+const SET_NUMS_CACHE_TTL_MS = 15 * 60 * 1000;
+
+let cachedSetNums: { loadedAt: number; setNums: string[] } | null = null;
 
 type BackfillBody = {
 	offset?: number;
@@ -23,6 +26,11 @@ function normalizeSetNums(input: unknown) {
 }
 
 async function getAllSetNumsFromKv() {
+	const now = Date.now();
+	if (cachedSetNums && now - cachedSetNums.loadedAt < SET_NUMS_CACHE_TTL_MS) {
+		return cachedSetNums.setNums;
+	}
+
 	const kv = getCatalogKvBinding();
 	if (!kv) return [] as string[];
 
@@ -37,7 +45,9 @@ async function getAllSetNumsFromKv() {
 		}
 	}
 
-	return [...setNums].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+	const all = [...setNums].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+	cachedSetNums = { loadedAt: now, setNums: all };
+	return all;
 }
 
 export async function POST(request: Request) {
