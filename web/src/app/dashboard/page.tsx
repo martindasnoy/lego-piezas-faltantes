@@ -14,6 +14,7 @@ const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltan
 const SALE_LIST_PREFIX = "Venta: ";
 const MASTER_EMAIL = "martindasnoy@gmail.com";
 const FACE_TOTAL = 20;
+const CMF_CHECK_HISTORY_KEY = "master_cmf_update_checks_v1";
 
 type MasterModuleKey = "poolWanted" | "poolSale" | "minifiguras";
 type MasterModules = Record<MasterModuleKey, boolean>;
@@ -102,6 +103,25 @@ type CachedImageRow = {
 	updated_at: string;
 };
 
+type MinifigStatsPayload = {
+	themes_count: number;
+	figures_count: number;
+	parts_count: number;
+	checked_at: string;
+};
+
+type CmfCheckLog = {
+	id: string;
+	created_at: string;
+	new_series: number;
+	new_minifigures: number;
+	new_parts: number;
+	total_series: number;
+	total_minifigures: number;
+	total_parts: number;
+	label: "initial" | "check";
+};
+
 export default function DashboardPage() {
 	const router = useRouter();
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
@@ -113,11 +133,15 @@ export default function DashboardPage() {
 	const [showMasterModal, setShowMasterModal] = useState(false);
 	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
 	const [showCacheImagesModal, setShowCacheImagesModal] = useState(false);
+	const [showUpdatesModal, setShowUpdatesModal] = useState(false);
 	const [cacheImages, setCacheImages] = useState<CachedImageRow[]>([]);
 	const [cacheImagesLoading, setCacheImagesLoading] = useState(false);
 	const [cacheImagesError, setCacheImagesError] = useState<string | null>(null);
 	const [cacheImagesPage, setCacheImagesPage] = useState(1);
 	const [cacheImagesTotalPages, setCacheImagesTotalPages] = useState(1);
+	const [checkingNewThings, setCheckingNewThings] = useState(false);
+	const [checkProgressText, setCheckProgressText] = useState("");
+	const [cmfCheckLogs, setCmfCheckLogs] = useState<CmfCheckLog[]>([]);
 	const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
 	const [maintenanceText, setMaintenanceText] = useState("");
 	const [maintenanceActive, setMaintenanceActive] = useState(false);
@@ -440,10 +464,163 @@ export default function DashboardPage() {
 		}
 	}
 
+	async function fetchMinifigStats() {
+		const response = await fetch("/api/system/minifigures/stats", { cache: "no-store" });
+		const payload = (await response.json()) as MinifigStatsPayload & { error?: string };
+		if (!response.ok) throw new Error(payload.error ?? "No se pudieron leer estadisticas CMF.");
+		return payload;
+	}
+
+	function persistCmfCheckLogs(nextLogs: CmfCheckLog[]) {
+		setCmfCheckLogs(nextLogs);
+		if (typeof window === "undefined") return;
+		window.localStorage.setItem(CMF_CHECK_HISTORY_KEY, JSON.stringify(nextLogs));
+	}
+
+	async function loadCmfChecks() {
+		if (!isMasterUser) return;
+		const stats = await fetchMinifigStats();
+
+		let stored: CmfCheckLog[] = [];
+		if (typeof window !== "undefined") {
+			try {
+				const raw = window.localStorage.getItem(CMF_CHECK_HISTORY_KEY);
+				if (raw) {
+					const parsed = JSON.parse(raw) as CmfCheckLog[];
+					if (Array.isArray(parsed)) stored = parsed;
+				}
+			} catch {
+				stored = [];
+			}
+		}
+
+		if (stored.length === 0) {
+			const initial: CmfCheckLog = {
+				id: `initial-${Date.now()}`,
+				created_at: stats.checked_at,
+				new_series: Number(stats.themes_count ?? 0),
+				new_minifigures: Number(stats.figures_count ?? 0),
+				new_parts: Number(stats.parts_count ?? 0),
+				total_series: Number(stats.themes_count ?? 0),
+				total_minifigures: Number(stats.figures_count ?? 0),
+				total_parts: Number(stats.parts_count ?? 0),
+				label: "initial",
+			};
+			persistCmfCheckLogs([initial]);
+			return;
+		}
+
+		persistCmfCheckLogs(stored);
+	}
+
+	function formatCheckDate(value: string) {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return "Fecha desconocida";
+		return date.toLocaleString("es-AR", {
+			year: "2-digit",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+	}
+
+	async function checkNewThings() {
+		if (!isMasterUser || checkingNewThings) return;
+		setCheckingNewThings(true);
+		setCheckProgressText("Leyendo estado inicial...");
+		setMessage(null);
+
+		try {
+			const before = await fetchMinifigStats();
+
+			setCheckProgressText("Actualizando series y minifiguras (KV)...");
+			let syncOffset = 0;
+			for (let i = 0; i < 400; i += 1) {
+				const syncResponse = await fetch("/api/system/minifigures/sync", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ sync_themes: syncOffset === 0, offset: syncOffset, batch_size: 1 }),
+				});
+				const syncPayload = (await syncResponse.json()) as {
+					error?: string;
+					next_offset?: number | null;
+					done?: boolean;
+				};
+
+				if (!syncResponse.ok) {
+					throw new Error(syncPayload.error ?? "No se pudo actualizar KV de minifiguras.");
+				}
+
+				if (syncPayload.done) break;
+				syncOffset = Number(syncPayload.next_offset ?? syncOffset + 1);
+			}
+
+			setCheckProgressText("Buscando minifiguras nuevas para backfill...");
+			const missingResponse = await fetch("/api/system/minifigures/missing-set-nums?limit=5000", { cache: "no-store" });
+			const missingPayload = (await missingResponse.json()) as {
+				error?: string;
+				missing_set_nums?: string[];
+			};
+			if (!missingResponse.ok) {
+				throw new Error(missingPayload.error ?? "No se pudo calcular faltantes de partes CMF.");
+			}
+
+			const missingSetNums = (missingPayload.missing_set_nums ?? []).filter(Boolean);
+			for (let index = 0; index < missingSetNums.length; index += 2) {
+				const chunk = missingSetNums.slice(index, index + 2);
+				setCheckProgressText(`Backfill lento de partes nuevas (${index + chunk.length}/${missingSetNums.length})...`);
+
+				const backfillResponse = await fetch("/api/system/minifigures/parts/backfill", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ set_nums: chunk, batch_size: chunk.length }),
+				});
+				const backfillPayload = (await backfillResponse.json()) as { error?: string };
+				if (!backfillResponse.ok) {
+					throw new Error(backfillPayload.error ?? "No se pudo completar el backfill de partes CMF.");
+				}
+			}
+
+			setCheckProgressText("Calculando diferencias...");
+			const after = await fetchMinifigStats();
+			const newSeries = Math.max(0, Number(after.themes_count ?? 0) - Number(before.themes_count ?? 0));
+			const newMinifigures = Math.max(0, Number(after.figures_count ?? 0) - Number(before.figures_count ?? 0));
+			const newParts = Math.max(0, Number(after.parts_count ?? 0) - Number(before.parts_count ?? 0));
+
+			const entry: CmfCheckLog = {
+				id: `check-${Date.now()}`,
+				created_at: after.checked_at,
+				new_series: newSeries,
+				new_minifigures: newMinifigures,
+				new_parts: newParts,
+				total_series: Number(after.themes_count ?? 0),
+				total_minifigures: Number(after.figures_count ?? 0),
+				total_parts: Number(after.parts_count ?? 0),
+				label: "check",
+			};
+
+			const nextLogs = [entry, ...cmfCheckLogs].slice(0, 30);
+			persistCmfCheckLogs(nextLogs);
+			setMessage(`Check new things OK: +${newSeries} series, +${newMinifigures} minifiguras, +${newParts} partes.`);
+		} catch (error) {
+			const text = error instanceof Error ? error.message : "No se pudo ejecutar Check new things.";
+			setMessage(text);
+		} finally {
+			setCheckProgressText("");
+			setCheckingNewThings(false);
+		}
+	}
+
 	useEffect(() => {
 		if (!showCacheImagesModal) return;
 		void loadCacheImages(cacheImagesPage);
 	}, [showCacheImagesModal, cacheImagesPage]);
+
+	useEffect(() => {
+		if (!showUpdatesModal) return;
+		void loadCmfChecks();
+	}, [showUpdatesModal]);
 
 	const sortedRegisteredUsers = useMemo(() => {
 		const users = [...registeredUsers];
@@ -1206,12 +1383,25 @@ export default function DashboardPage() {
 										>
 											Usuarios
 										</button>
+									</div>
+								</div>
+
+								<div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+									<p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Updates</p>
+									<div className="space-y-2">
 										<button
 											type="button"
 											onClick={() => setShowCacheImagesModal(true)}
 											className="flex w-full items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
 										>
 											Cache imagenes
+										</button>
+										<button
+											type="button"
+											onClick={() => setShowUpdatesModal(true)}
+											className="flex w-full items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+										>
+											Check new things
 										</button>
 									</div>
 								</div>
@@ -1270,6 +1460,57 @@ export default function DashboardPage() {
 									</div>
 								) : null}
 								{!cacheImagesLoading && !cacheImagesError && cacheImages.length === 0 ? <p className="text-sm text-slate-600">No hay imagenes cacheadas para mostrar.</p> : null}
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showUpdatesModal ? (
+					<div className="fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowUpdatesModal(false)}>
+						<div className="h-[82vh] w-full max-w-3xl rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Check new things</h3>
+								<button
+									type="button"
+									onClick={() => setShowUpdatesModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<div className="mt-4 h-[calc(82vh-84px)] space-y-4 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+
+								<div className="rounded-lg border border-slate-300 bg-white p-3">
+									<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Update CMF</p>
+									<p className="mt-1 text-xs text-slate-600">Busca novedades, actualiza KV y carga partes nuevas en DB de forma lenta.</p>
+									<button
+										type="button"
+										onClick={() => void checkNewThings()}
+										disabled={checkingNewThings}
+										className="mt-3 inline-flex items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+									>
+										{checkingNewThings ? "Running..." : "Run update"}
+									</button>
+									{checkProgressText ? <p className="mt-2 text-xs text-slate-600">{checkProgressText}</p> : null}
+								</div>
+
+								<div className="rounded-lg border border-slate-300 bg-white p-3">
+									<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ultimos checks</p>
+									<div className="mt-2 space-y-2">
+										{cmfCheckLogs.map((item) => (
+											<div key={item.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+												<p className="font-semibold text-slate-900">
+													{item.label === "initial" ? "Carga inicial" : "Check"} - {formatCheckDate(item.created_at)}
+												</p>
+												<p>
+													Nuevas series: <span className="font-semibold">{item.new_series}</span> | Minifiguras nuevas: <span className="font-semibold">{item.new_minifigures}</span> | Partes nuevas: <span className="font-semibold">{item.new_parts}</span>
+												</p>
+											</div>
+										))}
+										{cmfCheckLogs.length === 0 ? <p className="text-sm text-slate-600">No hay checks registrados.</p> : null}
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>

@@ -73,3 +73,33 @@ export async function upsertMinifigParts(rows: UpsertMinifigPartInput[]) {
 
 	if (error) throw new Error(error.message);
 }
+
+export async function countMinifigPartsRows() {
+	const supabase = getServerSupabaseClient();
+	const { count, error } = await supabase.from("minifig_parts_cache").select("set_num", { count: "exact", head: true });
+	if (error) throw new Error(error.message);
+	return Number(count ?? 0);
+}
+
+export async function listDistinctMinifigPartSetNums() {
+	const supabase = getServerSupabaseClient();
+	const out = new Set<string>();
+	let from = 0;
+	const pageSize = 1000;
+
+	while (true) {
+		const { data, error } = await supabase.from("minifig_parts_cache").select("set_num").range(from, from + pageSize - 1);
+		if (error) throw new Error(error.message);
+		if (!data || data.length === 0) break;
+
+		for (const row of data as Array<{ set_num: string | null }>) {
+			const setNum = String(row.set_num ?? "").trim().toUpperCase();
+			if (setNum) out.add(setNum);
+		}
+
+		if (data.length < pageSize) break;
+		from += pageSize;
+	}
+
+	return [...out].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+}

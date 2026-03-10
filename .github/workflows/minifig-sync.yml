@@ -1,0 +1,94 @@
+name: Minifig Sync (Every 10 Days)
+
+on:
+  schedule:
+    - cron: "0 4 */10 * *"
+  workflow_dispatch:
+
+jobs:
+  sync-minifig:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secret
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+        run: |
+          [ -n "$PREWARM_BASE_URL" ] || (echo "Missing PREWARM_BASE_URL" && exit 1)
+
+      - name: Sync minifigure themes and figures into KV
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          sync_call() {
+            local payload="$1"
+            curl -sS --fail --retry 4 --retry-delay 3 --retry-all-errors \
+              -X POST "$PREWARM_BASE_URL/api/system/minifigures/sync" \
+              -H "content-type: application/json" \
+              --data "$payload"
+          }
+
+          echo "Starting KV sync for minifigure themes and figures"
+          response="$(sync_call '{"sync_themes":true,"offset":0,"batch_size":1}')"
+          echo "$response" | jq -r '{offset,processed,next_offset,done}'
+
+          done_flag="$(echo "$response" | jq -r '.done // false')"
+          next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+          iterations=1
+          while [ "$done_flag" != "true" ]; do
+            sleep 2
+            response="$(sync_call "{\"offset\":$next_offset,\"batch_size\":1}")"
+            echo "$response" | jq -r '{offset,processed,next_offset,done}'
+
+            done_flag="$(echo "$response" | jq -r '.done // false')"
+            next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+            iterations=$((iterations + 1))
+            if [ "$iterations" -gt 3000 ]; then
+              echo "Aborting: too many sync iterations"
+              exit 1
+            fi
+          done
+
+          echo "KV sync complete"
+
+      - name: Backfill minifigure parts into DB (slow mode)
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          backfill_call() {
+            local payload="$1"
+            curl -sS --fail --retry 5 --retry-delay 4 --retry-all-errors \
+              -X POST "$PREWARM_BASE_URL/api/system/minifigures/parts/backfill" \
+              -H "content-type: application/json" \
+              --data "$payload"
+          }
+
+          echo "Starting slow DB backfill for minifigure parts"
+          response="$(backfill_call '{"offset":0,"batch_size":1}')"
+          echo "$response" | jq -r '{offset,processed,upserted,next_offset,done}'
+
+          done_flag="$(echo "$response" | jq -r '.done // false')"
+          next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+          iterations=1
+          while [ "$done_flag" != "true" ]; do
+            sleep 3
+            response="$(backfill_call "{\"offset\":$next_offset,\"batch_size\":1}")"
+            echo "$response" | jq -r '{offset,processed,upserted,next_offset,done}'
+
+            done_flag="$(echo "$response" | jq -r '.done // false')"
+            next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+            iterations=$((iterations + 1))
+            if [ "$iterations" -gt 5000 ]; then
+              echo "Aborting: too many backfill iterations"
+              exit 1
+            fi
+          done
+
+          echo "Minifigure DB backfill complete"
