@@ -1,8 +1,15 @@
 import { unstable_cache } from "next/cache";
+import { getCatalogKvBinding } from "@/lib/rebrickable-catalog-cache";
 
 const REBRICKABLE_THEMES_API = "https://rebrickable.com/api/v3/lego/themes/";
 const REBRICKABLE_SETS_API = "https://rebrickable.com/api/v3/lego/sets/";
 const PREWARM_REVALIDATE_SECONDS = 60 * 60 * 24 * 10;
+const MINIFIG_CACHE_VERSION = "v1";
+const MINIFIG_THEMES_KV_KEY = `minifig:${MINIFIG_CACHE_VERSION}:themes`;
+
+function getMinifigThemeFiguresKvKey(themeId: number) {
+	return `minifig:${MINIFIG_CACHE_VERSION}:theme:${themeId}:figures`;
+}
 
 type RebrickableTheme = {
 	id: number;
@@ -50,6 +57,17 @@ export type CachedMinifigurePart = {
 	color_name: string | null;
 	part_img_url: string | null;
 	is_spare: boolean;
+};
+
+type MinifigureThemesKvPayload = {
+	updatedAt: string;
+	results: CachedMinifigureTheme[];
+};
+
+type MinifigureThemeFiguresKvPayload = {
+	updatedAt: string;
+	themeId: number;
+	results: CachedMinifigureEntry[];
 };
 
 type ThemeStats = {
@@ -386,6 +404,72 @@ export async function getCachedMinifigureThemes(apiKey: string): Promise<CachedM
 	);
 
 	return cacheFn();
+}
+
+export async function getCachedMinifigureThemesFromKv(kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) return null;
+
+	const raw = await kv.get(MINIFIG_THEMES_KV_KEY);
+	if (!raw) return null;
+
+	try {
+		const parsed = JSON.parse(raw) as MinifigureThemesKvPayload;
+		if (!Array.isArray(parsed.results)) return null;
+		return {
+			updatedAt: String(parsed.updatedAt ?? new Date(0).toISOString()),
+			results: parsed.results,
+		};
+	} catch {
+		return null;
+	}
+}
+
+export async function setCachedMinifigureThemesToKv(themes: CachedMinifigureTheme[], kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) throw new Error("CATALOG_CACHE binding missing");
+
+	await kv.put(
+		MINIFIG_THEMES_KV_KEY,
+		JSON.stringify({
+			updatedAt: new Date().toISOString(),
+			results: themes,
+		} satisfies MinifigureThemesKvPayload),
+	);
+}
+
+export async function getCachedMinifiguresByThemeFromKv(themeId: number, kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) return null;
+
+	const raw = await kv.get(getMinifigThemeFiguresKvKey(themeId));
+	if (!raw) return null;
+
+	try {
+		const parsed = JSON.parse(raw) as MinifigureThemeFiguresKvPayload;
+		if (!Array.isArray(parsed.results)) return null;
+		return {
+			updatedAt: String(parsed.updatedAt ?? new Date(0).toISOString()),
+			themeId: Number(parsed.themeId ?? themeId),
+			results: parsed.results,
+		};
+	} catch {
+		return null;
+	}
+}
+
+export async function setCachedMinifiguresByThemeToKv(themeId: number, entries: CachedMinifigureEntry[], kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) throw new Error("CATALOG_CACHE binding missing");
+
+	await kv.put(
+		getMinifigThemeFiguresKvKey(themeId),
+		JSON.stringify({
+			updatedAt: new Date().toISOString(),
+			themeId,
+			results: entries,
+		} satisfies MinifigureThemeFiguresKvPayload),
+	);
 }
 
 export async function getCachedMinifiguresByTheme(themeId: number, apiKey: string): Promise<CachedMinifigureEntry[]> {

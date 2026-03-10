@@ -23,3 +23,13 @@ Fecha: 2026-02-25
   - branch `main`
   - root/path `web`
   - limpiar cache de build y redeploy.
+
+## Pendientes para manana (2026-03-10)
+
+- [x] Hacer funcionar la pagina de mantenimiento.
+
+- [ ] Hacer ranking de piezas para mostrar en listas.
+
+- [ ] Hacer desplegable de minifiguras desde KV o DB.
+
+- [ ] Imagenes de minifiguras tambien de KV.

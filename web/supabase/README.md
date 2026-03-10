@@ -32,6 +32,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
     - Crea tabla DB-first para cache de imagenes de piezas (`part_num + color`) con RLS y permisos para API.
 15. `part_popularity_cache.sql`
     - Crea tabla de ranking por pieza (`set_count`) para ordenar sugerencias del desplegable por popularidad.
+16. `minifig_parts_cache.sql`
+    - Crea tabla para cachear en DB las partes por minifigura (`set_num`) y servir `/api/rebrickable/minifigures/parts` sin depender de Rebrickable en runtime.
 
 ## Verificacion rapida
 
