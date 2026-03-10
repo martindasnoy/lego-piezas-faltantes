@@ -313,6 +313,7 @@ export default function DashboardPage() {
 		void loadDashboard();
 		const intervalId = window.setInterval(() => {
 			void loadMasterModules();
+			void loadMaintenanceConfig();
 		}, 10000);
 
 		return () => window.clearInterval(intervalId);
