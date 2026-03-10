@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 const REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego/parts/";
+const REBRICKABLE_CATEGORIES_API_BASE = "https://rebrickable.com/api/v3/lego/part_categories/";
 const CACHE_VERSION = "v1";
 
 export type CatalogPart = {
@@ -20,6 +21,12 @@ export type CachedPartColorsMetadata = {
 	updatedAt: string;
 	part_num: string;
 	preview: Array<{ color_name: string; part_img_url: string }>;
+};
+
+export type CatalogCategory = {
+	id: number;
+	name: string;
+	part_count: number;
 };
 
 type RebrickablePart = {
@@ -45,12 +52,28 @@ type RebrickablePartColorsPayload = {
 	results?: RebrickablePartColor[];
 };
 
+type RebrickableCategory = {
+	id: number;
+	name: string;
+	part_count?: number;
+	parent_id?: number | null;
+};
+
+type RebrickableCategoriesPayload = {
+	count?: number;
+	results?: RebrickableCategory[];
+};
+
 function getCacheKey(categoryId: string) {
 	return `catalog:${CACHE_VERSION}:category:${categoryId}:all`;
 }
 
 function getPartColorsCacheKey(partNum: string) {
 	return `catalog:${CACHE_VERSION}:part-colors:${partNum.trim().toUpperCase()}`;
+}
+
+function getCategoriesCacheKey() {
+	return `catalog:${CACHE_VERSION}:categories`;
 }
 
 function getRebrickableHeaders(apiKey: string) {
@@ -165,6 +188,66 @@ export async function setCachedPartColors(partNum: string, colors: CatalogPartCo
 			} satisfies CachedPartColorsMetadata,
 		},
 	);
+}
+
+export async function getCachedCategories(kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) return null;
+
+	const raw = await kv.get(getCategoriesCacheKey());
+	if (!raw) return null;
+
+	try {
+		const parsed = JSON.parse(raw) as { updatedAt: string; categories: CatalogCategory[] };
+		if (!Array.isArray(parsed.categories)) return null;
+		return parsed;
+	} catch {
+		return null;
+	}
+}
+
+export async function setCachedCategories(categories: CatalogCategory[], kvBinding?: KVNamespace | null) {
+	const kv = kvBinding ?? getCatalogKvBinding();
+	if (!kv) throw new Error("CATALOG_CACHE binding missing");
+
+	await kv.put(
+		getCategoriesCacheKey(),
+		JSON.stringify({
+			updatedAt: new Date().toISOString(),
+			categories,
+		}),
+	);
+}
+
+export async function fetchTopLevelCategoriesFromRebrickable(apiKey: string): Promise<CatalogCategory[]> {
+	const url = new URL(REBRICKABLE_CATEGORIES_API_BASE);
+	url.searchParams.set("page", "1");
+	url.searchParams.set("page_size", "1000");
+	url.searchParams.set("key", apiKey);
+
+	const first = await fetchRebrickableJson<RebrickableCategoriesPayload>(url.toString(), apiKey);
+	const all = [...(first.results ?? [])];
+	const count = Number(first.count ?? all.length);
+	const totalPages = Math.max(1, Math.ceil(count / 1000));
+
+	for (let page = 2; page <= totalPages; page += 1) {
+		const pageUrl = new URL(REBRICKABLE_CATEGORIES_API_BASE);
+		pageUrl.searchParams.set("page", String(page));
+		pageUrl.searchParams.set("page_size", "1000");
+		pageUrl.searchParams.set("key", apiKey);
+		const payload = await fetchRebrickableJson<RebrickableCategoriesPayload>(pageUrl.toString(), apiKey);
+		all.push(...(payload.results ?? []));
+	}
+
+	return all
+		.filter((category) => category.parent_id == null)
+		.map((category) => ({
+			id: Number(category.id),
+			name: String(category.name ?? "").trim(),
+			part_count: Math.max(0, Number(category.part_count ?? 0) || 0),
+		}))
+		.filter((category) => Number.isFinite(category.id) && category.id > 0 && category.name.length > 0)
+		.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
 }
 
 export async function fetchAllCategoryPartsFromRebrickable(categoryId: string, apiKey: string): Promise<CatalogPart[]> {

@@ -15,6 +15,7 @@ const SALE_LIST_PREFIX = "Venta: ";
 const MASTER_EMAIL = "martindasnoy@gmail.com";
 const FACE_TOTAL = 20;
 const CMF_CHECK_HISTORY_KEY = "master_cmf_update_checks_v1";
+const PIECES_CHECK_HISTORY_KEY = "master_pieces_update_checks_v1";
 
 type MasterModuleKey = "poolWanted" | "poolSale" | "minifiguras";
 type MasterModules = Record<MasterModuleKey, boolean>;
@@ -122,6 +123,26 @@ type CmfCheckLog = {
 	label: "initial" | "check";
 };
 
+type CatalogStatsPayload = {
+	categories_count: number;
+	pieces_count: number;
+	image_rows_count: number;
+	priority_rows_count: number;
+	checked_at: string;
+};
+
+type PiecesCheckLog = {
+	id: string;
+	created_at: string;
+	new_categories: number;
+	new_pieces: number;
+	new_images: number;
+	total_categories: number;
+	total_pieces: number;
+	total_images: number;
+	label: "initial" | "check";
+};
+
 export default function DashboardPage() {
 	const router = useRouter();
 	const [loadingMessage, setLoadingMessage] = useState("Cargando...");
@@ -142,6 +163,9 @@ export default function DashboardPage() {
 	const [checkingNewThings, setCheckingNewThings] = useState(false);
 	const [checkProgressText, setCheckProgressText] = useState("");
 	const [cmfCheckLogs, setCmfCheckLogs] = useState<CmfCheckLog[]>([]);
+	const [checkingPieces, setCheckingPieces] = useState(false);
+	const [piecesProgressText, setPiecesProgressText] = useState("");
+	const [piecesCheckLogs, setPiecesCheckLogs] = useState<PiecesCheckLog[]>([]);
 	const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
 	const [maintenanceText, setMaintenanceText] = useState("");
 	const [maintenanceActive, setMaintenanceActive] = useState(false);
@@ -612,6 +636,124 @@ export default function DashboardPage() {
 		}
 	}
 
+	async function fetchCatalogStats() {
+		const response = await fetch("/api/system/catalog/stats", { cache: "no-store" });
+		const payload = (await response.json()) as CatalogStatsPayload & { error?: string };
+		if (!response.ok) throw new Error(payload.error ?? "No se pudieron leer estadisticas de piezas.");
+		return payload;
+	}
+
+	function persistPiecesCheckLogs(nextLogs: PiecesCheckLog[]) {
+		setPiecesCheckLogs(nextLogs);
+		if (typeof window === "undefined") return;
+		window.localStorage.setItem(PIECES_CHECK_HISTORY_KEY, JSON.stringify(nextLogs));
+	}
+
+	async function loadPiecesChecks() {
+		if (!isMasterUser) return;
+		const stats = await fetchCatalogStats();
+
+		let stored: PiecesCheckLog[] = [];
+		if (typeof window !== "undefined") {
+			try {
+				const raw = window.localStorage.getItem(PIECES_CHECK_HISTORY_KEY);
+				if (raw) {
+					const parsed = JSON.parse(raw) as PiecesCheckLog[];
+					if (Array.isArray(parsed)) stored = parsed;
+				}
+			} catch {
+				stored = [];
+			}
+		}
+
+		if (stored.length === 0) {
+			const initial: PiecesCheckLog = {
+				id: `pieces-initial-${Date.now()}`,
+				created_at: stats.checked_at,
+				new_categories: Number(stats.categories_count ?? 0),
+				new_pieces: Number(stats.pieces_count ?? 0),
+				new_images: Number(stats.image_rows_count ?? 0),
+				total_categories: Number(stats.categories_count ?? 0),
+				total_pieces: Number(stats.pieces_count ?? 0),
+				total_images: Number(stats.image_rows_count ?? 0),
+				label: "initial",
+			};
+			persistPiecesCheckLogs([initial]);
+			return;
+		}
+
+		persistPiecesCheckLogs(stored);
+	}
+
+	async function checkNewPiecesThings() {
+		if (!isMasterUser || checkingPieces) return;
+		setCheckingPieces(true);
+		setPiecesProgressText("Leyendo estado inicial de piezas...");
+		setMessage(null);
+
+		try {
+			const before = await fetchCatalogStats();
+
+			let totalNewCategories = 0;
+			let totalNewPieces = 0;
+			let totalNewImages = 0;
+
+			setPiecesProgressText("Chequeando categorias y piezas nuevas...");
+			let offset = 0;
+			for (let i = 0; i < 400; i += 1) {
+				const response = await fetch("/api/system/catalog/pieces-sync", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ sync_categories: offset === 0, offset, batch_size: 1 }),
+				});
+				const payload = (await response.json()) as {
+					error?: string;
+					new_categories?: number;
+					next_offset?: number | null;
+					done?: boolean;
+					stats?: Array<{ new_parts?: number; new_color_variants?: number }>;
+				};
+
+				if (!response.ok) {
+					throw new Error(payload.error ?? "No se pudo actualizar piezas.");
+				}
+
+				totalNewCategories += Number(payload.new_categories ?? 0);
+				for (const row of payload.stats ?? []) {
+					totalNewPieces += Number(row.new_parts ?? 0);
+					totalNewImages += Number(row.new_color_variants ?? 0);
+				}
+
+				if (payload.done) break;
+				offset = Number(payload.next_offset ?? offset + 1);
+				setPiecesProgressText(`Chequeando piezas por categoria (${offset})...`);
+			}
+
+			const after = await fetchCatalogStats();
+			const entry: PiecesCheckLog = {
+				id: `pieces-check-${Date.now()}`,
+				created_at: after.checked_at,
+				new_categories: Math.max(0, totalNewCategories),
+				new_pieces: Math.max(0, totalNewPieces),
+				new_images: Math.max(0, totalNewImages),
+				total_categories: Number(after.categories_count ?? before.categories_count ?? 0),
+				total_pieces: Number(after.pieces_count ?? before.pieces_count ?? 0),
+				total_images: Number(after.image_rows_count ?? before.image_rows_count ?? 0),
+				label: "check",
+			};
+
+			const nextLogs = [entry, ...piecesCheckLogs].slice(0, 30);
+			persistPiecesCheckLogs(nextLogs);
+			setMessage(`Update piezas OK: +${entry.new_categories} categorias, +${entry.new_pieces} piezas, +${entry.new_images} imagenes/variantes.`);
+		} catch (error) {
+			const text = error instanceof Error ? error.message : "No se pudo ejecutar update de piezas.";
+			setMessage(text);
+		} finally {
+			setPiecesProgressText("");
+			setCheckingPieces(false);
+		}
+	}
+
 	useEffect(() => {
 		if (!showCacheImagesModal) return;
 		void loadCacheImages(cacheImagesPage);
@@ -620,6 +762,7 @@ export default function DashboardPage() {
 	useEffect(() => {
 		if (!showUpdatesModal) return;
 		void loadCmfChecks();
+		void loadPiecesChecks();
 	}, [showUpdatesModal]);
 
 	const sortedRegisteredUsers = useMemo(() => {
@@ -1479,36 +1622,72 @@ export default function DashboardPage() {
 								</button>
 							</div>
 
-							<div className="mt-4 h-[calc(82vh-84px)] space-y-4 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+							<div className="mt-4 h-[calc(82vh-84px)] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+								<div className="grid gap-4 md:grid-cols-2">
+									<div className="space-y-4">
+										<div className="rounded-lg border border-slate-300 bg-white p-3">
+											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Update piezas</p>
+											<p className="mt-1 text-xs text-slate-600">Chequea categorias nuevas, piezas nuevas y agrega variantes de imagenes en DB.</p>
+											<button
+												type="button"
+												onClick={() => void checkNewPiecesThings()}
+												disabled={checkingPieces}
+												className="mt-3 inline-flex items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+											>
+												{checkingPieces ? "Running..." : "Run update"}
+											</button>
+											{piecesProgressText ? <p className="mt-2 text-xs text-slate-600">{piecesProgressText}</p> : null}
+										</div>
 
-								<div className="rounded-lg border border-slate-300 bg-white p-3">
-									<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Update CMF</p>
-									<p className="mt-1 text-xs text-slate-600">Busca novedades, actualiza KV y carga partes nuevas en DB de forma lenta.</p>
-									<button
-										type="button"
-										onClick={() => void checkNewThings()}
-										disabled={checkingNewThings}
-										className="mt-3 inline-flex items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-									>
-										{checkingNewThings ? "Running..." : "Run update"}
-									</button>
-									{checkProgressText ? <p className="mt-2 text-xs text-slate-600">{checkProgressText}</p> : null}
-								</div>
-
-								<div className="rounded-lg border border-slate-300 bg-white p-3">
-									<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ultimos checks</p>
-									<div className="mt-2 space-y-2">
-										{cmfCheckLogs.map((item) => (
-											<div key={item.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
-												<p className="font-semibold text-slate-900">
-													{item.label === "initial" ? "Carga inicial" : "Check"} - {formatCheckDate(item.created_at)}
-												</p>
-												<p>
-													Nuevas series: <span className="font-semibold">{item.new_series}</span> | Minifiguras nuevas: <span className="font-semibold">{item.new_minifigures}</span> | Partes nuevas: <span className="font-semibold">{item.new_parts}</span>
-												</p>
+										<div className="rounded-lg border border-slate-300 bg-white p-3">
+											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ultimos checks</p>
+											<div className="mt-2 space-y-2">
+												{piecesCheckLogs.map((item) => (
+													<div key={item.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+														<p className="font-semibold text-slate-900">
+															{item.label === "initial" ? "Carga inicial" : "Check"} - {formatCheckDate(item.created_at)}
+														</p>
+														<p>
+															Nuevas categorias: <span className="font-semibold">{item.new_categories}</span> | Piezas nuevas: <span className="font-semibold">{item.new_pieces}</span> | Imagenes nuevas: <span className="font-semibold">{item.new_images}</span>
+														</p>
+													</div>
+												))}
+												{piecesCheckLogs.length === 0 ? <p className="text-sm text-slate-600">No hay checks registrados.</p> : null}
 											</div>
-										))}
-										{cmfCheckLogs.length === 0 ? <p className="text-sm text-slate-600">No hay checks registrados.</p> : null}
+										</div>
+									</div>
+
+									<div className="space-y-4">
+										<div className="rounded-lg border border-slate-300 bg-white p-3">
+											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Update CMF</p>
+											<p className="mt-1 text-xs text-slate-600">Busca novedades, actualiza KV y carga partes nuevas en DB de forma lenta.</p>
+											<button
+												type="button"
+												onClick={() => void checkNewThings()}
+												disabled={checkingNewThings}
+												className="mt-3 inline-flex items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+											>
+												{checkingNewThings ? "Running..." : "Run update"}
+											</button>
+											{checkProgressText ? <p className="mt-2 text-xs text-slate-600">{checkProgressText}</p> : null}
+										</div>
+
+										<div className="rounded-lg border border-slate-300 bg-white p-3">
+											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ultimos checks</p>
+											<div className="mt-2 space-y-2">
+												{cmfCheckLogs.map((item) => (
+													<div key={item.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+														<p className="font-semibold text-slate-900">
+															{item.label === "initial" ? "Carga inicial" : "Check"} - {formatCheckDate(item.created_at)}
+														</p>
+														<p>
+															Nuevas series: <span className="font-semibold">{item.new_series}</span> | Minifiguras nuevas: <span className="font-semibold">{item.new_minifigures}</span> | Partes nuevas: <span className="font-semibold">{item.new_parts}</span>
+														</p>
+													</div>
+												))}
+												{cmfCheckLogs.length === 0 ? <p className="text-sm text-slate-600">No hay checks registrados.</p> : null}
+											</div>
+										</div>
 									</div>
 								</div>
 							</div>

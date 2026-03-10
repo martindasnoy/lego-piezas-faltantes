@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 import { getPopularityByPartNums } from "@/lib/part-popularity-db";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
-import { getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
+import { getCachedCategories, getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
 
 type RebrickablePart = {
 	part_num: string;
@@ -25,9 +25,11 @@ async function getAllCatalogPartsFromKv(): Promise<CatalogPartLite[]> {
 		return kvCatalogCache.parts;
 	}
 
+	const categories = (await getCachedCategories())?.categories ?? staticRebrickableCategories;
+
 	const byPartNum = new Map<string, CatalogPartLite>();
 	await Promise.all(
-		staticRebrickableCategories.map(async (category) => {
+		categories.map(async (category) => {
 			const cached = await getCachedCategoryAllParts(String(category.id));
 			for (const row of cached?.parts ?? []) {
 				const partNum = String(row.part_num ?? "").trim().toUpperCase();

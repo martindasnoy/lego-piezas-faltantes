@@ -120,3 +120,10 @@ export async function getFallbackImagesByPartNums(partNums: string[]) {
 
 	return byPart;
 }
+
+export async function countPartImageRows() {
+	const supabase = getServerSupabaseClient();
+	const { count, error } = await supabase.from("part_image_cache").select("cache_key", { count: "exact", head: true });
+	if (error) throw new Error(error.message);
+	return Number(count ?? 0);
+}

@@ -1,0 +1,55 @@
+name: Pieces Sync (Every 10 Days)
+
+on:
+  schedule:
+    - cron: "0 5 */10 * *"
+  workflow_dispatch:
+
+jobs:
+  sync-pieces:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secret
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+        run: |
+          [ -n "$PREWARM_BASE_URL" ] || (echo "Missing PREWARM_BASE_URL" && exit 1)
+
+      - name: Check and sync catalog pieces
+        env:
+          PREWARM_BASE_URL: ${{ secrets.PREWARM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          call_sync() {
+            local payload="$1"
+            curl -sS --fail --retry 5 --retry-delay 4 --retry-all-errors \
+              -X POST "$PREWARM_BASE_URL/api/system/catalog/pieces-sync" \
+              -H "content-type: application/json" \
+              --data "$payload"
+          }
+
+          echo "Starting pieces sync"
+          response="$(call_sync '{"sync_categories":true,"offset":0,"batch_size":1}')"
+          echo "$response" | jq -r '{offset,processed_categories,new_categories,next_offset,done}'
+
+          done_flag="$(echo "$response" | jq -r '.done // false')"
+          next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+          iterations=1
+          while [ "$done_flag" != "true" ]; do
+            sleep 3
+            response="$(call_sync "{\"offset\":$next_offset,\"batch_size\":1}")"
+            echo "$response" | jq -r '{offset,processed_categories,new_categories,next_offset,done}'
+
+            done_flag="$(echo "$response" | jq -r '.done // false')"
+            next_offset="$(echo "$response" | jq -r '.next_offset // 0')"
+
+            iterations=$((iterations + 1))
+            if [ "$iterations" -gt 4000 ]; then
+              echo "Aborting: too many pieces sync iterations"
+              exit 1
+            fi
+          done
+
+          echo "Pieces sync complete"

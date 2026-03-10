@@ -47,3 +47,10 @@ export async function upsertPopularities(rows: UpsertPopularityInput[]) {
 	const { error } = await supabase.from("part_popularity_cache").upsert(payload, { onConflict: "part_num" });
 	if (error) throw new Error(error.message);
 }
+
+export async function countPartPopularityRows() {
+	const supabase = getServerSupabaseClient();
+	const { count, error } = await supabase.from("part_popularity_cache").select("part_num", { count: "exact", head: true });
+	if (error) throw new Error(error.message);
+	return Number(count ?? 0);
+}

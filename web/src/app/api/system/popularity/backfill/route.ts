@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { staticRebrickableCategories } from "@/lib/rebrickable-categories-static";
-import { getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
+import { getCachedCategories, getCachedCategoryAllParts } from "@/lib/rebrickable-catalog-cache";
 import { getPopularityByPartNums, upsertPopularities } from "@/lib/part-popularity-db";
 import { getRuntimeEnvValue } from "@/lib/runtime-env";
 
@@ -26,7 +26,8 @@ async function getAllCatalogPartNumsFromKv() {
 	}
 
 	const all = new Set<string>();
-	for (const category of staticRebrickableCategories) {
+	const categories = (await getCachedCategories())?.categories ?? staticRebrickableCategories;
+	for (const category of categories) {
 		const cached = await getCachedCategoryAllParts(String(category.id));
 		for (const part of cached?.parts ?? []) {
 			const partNum = String(part.part_num ?? "").trim().toUpperCase();
