@@ -69,4 +69,11 @@ jobs:
           URL="https://lego-piezas-faltantes.martindasnoy.workers.dev/api/system/health"
           BODY=$(curl -fsS "$URL")
           echo "$BODY"
-          printf "%s" "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d); if(!j?.bindings?.catalog_cache){console.error('Missing CATALOG_CACHE binding in production'); process.exit(1);} console.log('CATALOG_CACHE binding verified');});"
+          printf "%s" "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d); if(!j?.bindings?.catalog_cache){console.error('Missing CATALOG_CACHE binding in production'); process.exit(1);} if(!j?.env?.rebrickable_api_key){console.error('Missing REBRICKABLE_API_KEY in production runtime'); process.exit(1);} console.log('CATALOG_CACHE and REBRICKABLE_API_KEY verified');});"
+
+      - name: Verify production system endpoints
+        run: |
+          curl -fsS "https://lego-piezas-faltantes.martindasnoy.workers.dev/api/system/minifigures/stats" >/tmp/minifig_stats.json
+          cat /tmp/minifig_stats.json
+          curl -fsS "https://lego-piezas-faltantes.martindasnoy.workers.dev/api/system/catalog/stats" >/tmp/catalog_stats.json
+          cat /tmp/catalog_stats.json

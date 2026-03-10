@@ -25,12 +25,12 @@ export async function POST(request: Request) {
 
 	const kv = getCatalogKvBinding();
 	if (!kv) {
-		return NextResponse.json({ error: "CATALOG_CACHE binding missing." }, { status: 500 });
+		return NextResponse.json({ error: "CATALOG_CACHE binding missing. Ejecuta en Cloudflare Worker (wrangler dev/deploy) con binding activo." }, { status: 500 });
 	}
 
 	const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
 	if (!apiKey) {
-		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY." }, { status: 500 });
+		return NextResponse.json({ error: "Configura REBRICKABLE_API_KEY en el entorno runtime del Worker." }, { status: 500 });
 	}
 
 	try {
