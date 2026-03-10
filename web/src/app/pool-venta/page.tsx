@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -330,11 +329,7 @@ export default function PoolVentaPage() {
 						<div>
 							<div className="flex items-start justify-between gap-2">
 								<h1 className="text-3xl font-semibold text-slate-900">Pool de items a la venta</h1>
-								{currentLugLogoUrl ? (
-									<img src={currentLugLogoUrl} alt="Logo LUG" className="h-16 w-auto max-w-[192px] shrink-0 object-contain sm:hidden" />
-								) : (
-									<Image src="/pool-logo.svg" alt="Pool" width={144} height={40} className="shrink-0 sm:hidden" />
-								)}
+								{currentLugLogoUrl ? <img src={currentLugLogoUrl} alt="Logo LUG" className="h-16 w-auto max-w-[192px] shrink-0 object-contain sm:hidden" /> : null}
 							</div>
 							<div className="mt-2 flex items-center gap-2">
 								<label htmlFor="pool-venta-sort" className="text-sm text-slate-700">
@@ -357,11 +352,7 @@ export default function PoolVentaPage() {
 								</label>
 							</div>
 						</div>
-						{currentLugLogoUrl ? (
-							<img src={currentLugLogoUrl} alt="Logo LUG" className="hidden h-24 w-auto max-w-[440px] shrink-0 self-start object-contain sm:block sm:self-auto" />
-						) : (
-							<Image src="/pool-logo.svg" alt="Pool" width={240} height={68} className="hidden shrink-0 self-start sm:block sm:self-auto" />
-						)}
+						{currentLugLogoUrl ? <img src={currentLugLogoUrl} alt="Logo LUG" className="hidden h-24 w-auto max-w-[440px] shrink-0 self-start object-contain sm:block sm:self-auto" /> : null}
 					</div>
 				</header>
 

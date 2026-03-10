@@ -5,9 +5,11 @@ drop function if exists public.get_balug_members_public();
 
 create or replace function public.get_balug_members_public()
 returns table (
+  user_id uuid,
   display_name text,
   social_platform text,
   social_handle text,
+  lug_role text,
   created_at timestamptz
 )
 language sql
@@ -25,6 +27,7 @@ as $$
     limit 1
   )
   select
+    u.id as user_id,
     coalesce(
       nullif(u.raw_user_meta_data ->> 'display_name', ''),
       nullif(u.raw_user_meta_data ->> 'full_name', ''),
@@ -37,8 +40,10 @@ as $$
       else null
     end as social_platform,
     nullif(trim(coalesce(u.raw_user_meta_data ->> 'social_handle', '')), '') as social_handle,
+    case when lower(coalesce(lm.role, 'member')) = 'admin' then 'admin' else 'member' end as lug_role,
     u.created_at
   from my_lug ml
+  join public.lugs l on l.id = ml.lug_id
   join public.lug_memberships lm on lm.lug_id = ml.lug_id
   join auth.users u on u.id = lm.user_id
   where auth.uid() is not null

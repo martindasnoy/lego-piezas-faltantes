@@ -29,7 +29,48 @@ export default function OfferedPage() {
 	const [rows, setRows] = useState<OfferedRow[]>([]);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [message, setMessage] = useState<string | null>(null);
+	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#0093DD");
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+
+	async function loadCurrentLugPrimaryColor(userId: string) {
+		if (!userId) {
+			setCurrentLugPrimaryColor("#0093DD");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data: memberships, error: membershipsError } = await supabase
+				.from("lug_memberships")
+				.select("lug_id,role,joined_at")
+				.eq("user_id", userId)
+				.order("joined_at", { ascending: true });
+
+			if (membershipsError) {
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
+			if (rows.length === 0) {
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("primary_color").eq("id", selected.lug_id).maybeSingle();
+
+			if (lugError) {
+				setCurrentLugPrimaryColor("#0093DD");
+				return;
+			}
+
+			const color = String((lug as Record<string, unknown> | null)?.primary_color ?? "").trim();
+			setCurrentLugPrimaryColor(/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#0093DD");
+		} catch {
+			setCurrentLugPrimaryColor("#0093DD");
+		}
+	}
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -51,6 +92,8 @@ export default function OfferedPage() {
 					router.replace("/");
 					return;
 				}
+
+				await loadCurrentLugPrimaryColor(user.id);
 
 				const { data, error } = await supabase.rpc("get_my_offered_pieces");
 				if (error) {
@@ -229,7 +272,7 @@ export default function OfferedPage() {
 					<p className="mt-1 text-sm text-slate-600">Lotes: {totals.lots} - Piezas: {totals.pieces}</p>
 				</header>
 
-				<section className="rounded-xl border border-[#007bb8] bg-[#0093DD] p-4 text-white">
+				<section className="rounded-xl p-4 text-white" style={{ backgroundColor: currentLugPrimaryColor, border: `1px solid ${currentLugPrimaryColor}` }}>
 					<p className="text-sm">Este es el resumen de las piezas que ofreciste a otros miembros de Balug. Gracias por sumar a la comunidad!</p>
 				</section>
 

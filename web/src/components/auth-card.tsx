@@ -81,11 +81,7 @@ export function AuthCard() {
 	return (
 		<>
 			<h2 className="mt-4 text-2xl font-semibold text-slate-900">{isLogin ? "Iniciar sesion" : "Crear cuenta"}</h2>
-			<p className="mt-2 text-sm text-slate-600">
-				{isLogin
-					? "Accede para crear y publicar tus listas de piezas faltantes."
-					: "Crea tu usuario para empezar a cargar listas y compartirlas."}
-			</p>
+			{!isLogin ? <p className="mt-2 text-sm text-slate-600">Crea tu usuario para empezar a cargar listas y compartirlas.</p> : null}
 
 			<form onSubmit={onSubmit} className="mt-8 space-y-5">
 				{!isLogin && (

@@ -40,6 +40,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
     - Fase 2 de comunidades LUG: aplica aislamiento por `lug_id` en RLS y RPCs de pool/ofertas/matches, con helper para asignar `lug_id` por defecto al crear listas.
 19. `lugs_phase3_profile_fields.sql`
     - Fase 3 de comunidades LUG: agrega columnas `country`, `description` y `color_4` en `lugs` para guardar el perfil completo desde panel LUG admin.
+20. `lugs_disable_default_assignment.sql`
+    - Desactiva trigger/funcion que autoasigna `balug` al registrarse (para forzar seleccion de LUG con `popNewLUG`).
 
 ## Verificacion rapida
 
