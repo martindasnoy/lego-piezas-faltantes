@@ -2226,12 +2226,37 @@ export default function DashboardPage() {
 					</div>
 
 					<div className="flex flex-col gap-4">
-						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
-							<div className="relative flex justify-center">
-								{currentLugId && currentLugLogoUrl ? <img src={currentLugLogoUrl} alt={currentLugName ? `Logo ${currentLugName}` : "Logo LUG"} className="h-32 w-auto max-w-[420px] object-contain" /> : null}
+						<div className="rounded-xl border border-slate-200 p-3 text-center sm:p-4">
+							<div className="flex justify-center">
+								<img src="/Minifigura_silueta.png?v=5" alt="Minifiguras" className="h-24 w-24 object-contain" />
 							</div>
-							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
-							<div className="mt-4 flex flex-col items-center gap-2">
+							<div className="mt-3 flex justify-center">
+								<div className="group relative">
+									{showMinifigurasModule ? (
+										<Link
+											href="/dashboard/minifiguras"
+											className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+										>
+											Minifiguras CMF
+										</Link>
+									) : (
+										<button
+											type="button"
+											disabled
+											className="inline-flex h-10 cursor-not-allowed items-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
+										>
+											Proximamente
+										</button>
+									)}
+									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
+										Lleva la cuenta de tus colecciones de minifiguras de coleccion de todas las series.
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
+							<div className="mb-3 flex flex-col items-center gap-2">
 								<button
 									type="button"
 									onClick={() => void openBalugMembersModal()}
@@ -2239,6 +2264,12 @@ export default function DashboardPage() {
 								>
 									Integrantes del LUG
 								</button>
+							</div>
+							<div className="relative flex justify-center">
+								{currentLugId && currentLugLogoUrl ? <img src={currentLugLogoUrl} alt={currentLugName ? `Logo ${currentLugName}` : "Logo LUG"} className="h-32 w-auto max-w-[420px] object-contain" /> : null}
+							</div>
+							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
+							<div className="mt-4 flex flex-col items-center gap-2">
 								{showPoolWantedModule ? (
 									<div className="group relative flex w-full justify-center">
 										<Link
@@ -2294,34 +2325,6 @@ export default function DashboardPage() {
 							</div>
 						) : null}
 
-						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
-							<div className="flex justify-center">
-								<img src="/Minifigura_silueta.png?v=3" alt="Minifiguras" className="h-28 w-28 object-contain" />
-							</div>
-							<div className="mt-4 flex justify-center">
-								<div className="group relative">
-									{showMinifigurasModule ? (
-										<Link
-											href="/dashboard/minifiguras"
-											className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
-										>
-											Minifiguras CMF
-										</Link>
-									) : (
-										<button
-											type="button"
-											disabled
-											className="inline-flex h-10 cursor-not-allowed items-center rounded-lg border border-slate-300 bg-slate-200 px-4 text-sm font-semibold text-slate-500"
-										>
-											Proximamente
-										</button>
-									)}
-									<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 scale-95 rounded-[4px] border border-slate-300 bg-slate-100 px-3 py-2 text-center text-[11px] font-normal text-slate-900 opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:delay-[1000ms] group-hover:scale-100 group-hover:opacity-100 group-focus-within:delay-[1000ms] group-focus-within:scale-100 group-focus-within:opacity-100">
-										Lleva la cuenta de tus colecciones de minifiguras de coleccion de todas las series.
-									</div>
-								</div>
-							</div>
-						</div>
 					</div>
 				</section>
 
