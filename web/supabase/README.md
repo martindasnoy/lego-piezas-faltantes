@@ -42,6 +42,8 @@ Ejecuta estos scripts en este orden dentro de Supabase SQL Editor para dejar `po
     - Fase 3 de comunidades LUG: agrega columnas `country`, `description` y `color_4` en `lugs` para guardar el perfil completo desde panel LUG admin.
 20. `lugs_disable_default_assignment.sql`
     - Desactiva trigger/funcion que autoasigna `balug` al registrarse (para forzar seleccion de LUG con `popNewLUG`).
+21. `lug_join_requests.sql`
+    - Crea solicitudes de ingreso a LUG (`pending/approved/rejected`) para flujo popNewLUG con alerta a admins.
 
 ## Verificacion rapida
 

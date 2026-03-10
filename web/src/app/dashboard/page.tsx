@@ -146,6 +146,19 @@ type LugDirectoryRow = {
 	users_count: number;
 };
 
+type PendingJoinRequestRow = {
+	id: string;
+	lug_id: string;
+	requester_user_id?: string;
+	requester_display_name?: string;
+	requester_social_platform?: "instagram" | "facebook" | null;
+	requester_social_handle?: string | null;
+	request_message?: string | null;
+	requester_social_contact?: string | null;
+	status: "pending" | "approved" | "rejected";
+	created_at: string;
+};
+
 type MinifigStatsPayload = {
 	themes_count: number;
 	figures_count: number;
@@ -198,6 +211,20 @@ export default function DashboardPage() {
 	const [currentLugId, setCurrentLugId] = useState("");
 	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#0093DD");
 	const [currentUserCanManageLugMembers, setCurrentUserCanManageLugMembers] = useState(false);
+	const [pendingJoinAlertsCount, setPendingJoinAlertsCount] = useState(0);
+	const [hasPendingJoinRequest, setHasPendingJoinRequest] = useState(false);
+	const [pendingJoinRequestLugId, setPendingJoinRequestLugId] = useState("");
+	const [pendingJoinRequestLugName, setPendingJoinRequestLugName] = useState("");
+	const [showJoinRequestsModal, setShowJoinRequestsModal] = useState(false);
+	const [loadingJoinRequests, setLoadingJoinRequests] = useState(false);
+	const [processingJoinRequestId, setProcessingJoinRequestId] = useState<string | null>(null);
+	const [pendingJoinRequests, setPendingJoinRequests] = useState<PendingJoinRequestRow[]>([]);
+	const [showRequestMessageModal, setShowRequestMessageModal] = useState(false);
+	const [requestTargetLugId, setRequestTargetLugId] = useState("");
+	const [requestTargetLugName, setRequestTargetLugName] = useState("");
+	const [requestMessageInput, setRequestMessageInput] = useState("");
+	const [requestSocialPlatform, setRequestSocialPlatform] = useState<"instagram" | "facebook" | "other">("instagram");
+	const [requestSocialInput, setRequestSocialInput] = useState("");
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [showMasterModal, setShowMasterModal] = useState(false);
 	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
@@ -433,6 +460,7 @@ export default function DashboardPage() {
 				setSelectedFace(normalizeFaceValue(storedFace));
 				const currentLug = await loadCurrentLugBranding(user.id, isMaster);
 				if (!currentLug) {
+					await loadOwnPendingJoinRequest(user.id);
 					await loadLugsDirectoryRows();
 					setShowNewLugAssignmentModal(true);
 				}
@@ -632,6 +660,55 @@ export default function DashboardPage() {
 		await loadLugsDirectoryRows();
 	}
 
+	function resetNewLugPanelState() {
+		setShowCreateLugInline(false);
+		setNewLugNameInput("");
+		setNewLugCountryInput("");
+		setNewLugLogoDataUrl("");
+		setNewLugColor1("#006eb2");
+		setNewLugColor2("#f7c948");
+		setNewLugColor3("#111827");
+		setNewLugColor4("#ffffff");
+	}
+
+	async function loadOwnPendingJoinRequest(targetUserId: string) {
+		if (!targetUserId) {
+			setHasPendingJoinRequest(false);
+			setPendingJoinRequestLugId("");
+			setPendingJoinRequestLugName("");
+			return;
+		}
+
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase
+				.from("lug_join_requests")
+				.select("id,lug_id,status,created_at")
+				.eq("requester_user_id", targetUserId)
+				.eq("status", "pending")
+				.order("created_at", { ascending: false })
+				.limit(1)
+				.maybeSingle();
+
+			if (error || !data) {
+				setHasPendingJoinRequest(false);
+				setPendingJoinRequestLugId("");
+				setPendingJoinRequestLugName("");
+				return;
+			}
+
+			setHasPendingJoinRequest(true);
+			const pending = data as PendingJoinRequestRow;
+			setPendingJoinRequestLugId(String(pending.lug_id ?? "").trim());
+			const { data: lug } = await supabase.from("lugs").select("name").eq("id", pending.lug_id).maybeSingle();
+			setPendingJoinRequestLugName(String((lug as Record<string, unknown> | null)?.name ?? "").trim());
+		} catch {
+			setHasPendingJoinRequest(false);
+			setPendingJoinRequestLugId("");
+			setPendingJoinRequestLugName("");
+		}
+	}
+
 	async function handleNewLugLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
 		const file = event.target.files?.[0];
 		if (!file) return;
@@ -664,24 +741,170 @@ export default function DashboardPage() {
 		}
 	}
 
-	async function assignCurrentUserToLug(lugId: string) {
+	async function requestCurrentUserToLug(lugId: string, lugName: string) {
 		if (!userId || !lugId) return;
-		setAssigningLugId(lugId);
-		setMessage(null);
-		try {
-			const supabase = getSupabaseClient();
-			const { error } = await supabase.from("lug_memberships").insert({ lug_id: lugId, user_id: userId, role: "member" });
-			if (error) {
-				setMessage(`No se pudo asignar el LUG: ${error.message}`);
+
+		if (hasPendingJoinRequest) {
+			if (pendingJoinRequestLugId !== lugId) {
+				setMessage("Ya tienes una solicitud pendiente. Cancelala para elegir otro LUG.");
 				return;
 			}
 
-			await loadCurrentLugBranding(userId, isMasterUser);
-			setShowNewLugAssignmentModal(false);
+			if (!window.confirm(`Quieres cancelar tu solicitud a ${lugName}?`)) return;
+			setAssigningLugId(lugId);
+			setMessage(null);
+			try {
+				const supabase = getSupabaseClient();
+				const { error } = await supabase
+					.from("lug_join_requests")
+					.delete()
+					.eq("requester_user_id", userId)
+					.eq("lug_id", lugId)
+					.eq("status", "pending");
+
+				if (error) {
+					setMessage(`No se pudo cancelar la solicitud: ${error.message}`);
+					return;
+				}
+
+				setHasPendingJoinRequest(false);
+				setPendingJoinRequestLugId("");
+				setPendingJoinRequestLugName("");
+				resetNewLugPanelState();
+				await loadLugsDirectoryRows();
+				await loadOwnPendingJoinRequest(userId);
+				setMessage("Solicitud cancelada.");
+			} finally {
+				setAssigningLugId(null);
+			}
+			return;
+		}
+
+		setRequestTargetLugId(lugId);
+		setRequestTargetLugName(lugName);
+		setRequestMessageInput("");
+		setRequestSocialPlatform(socialPlatform === "facebook" ? "facebook" : socialPlatform === "instagram" ? "instagram" : "instagram");
+		setRequestSocialInput(socialHandle ? `@${socialHandle}` : "");
+		setShowRequestMessageModal(true);
+	}
+
+	async function submitLugJoinRequest() {
+		if (!userId || !requestTargetLugId) return;
+		const messageText = requestMessageInput.trim();
+		const socialText = requestSocialInput.trim();
+		const socialPlatformLabel = requestSocialPlatform === "instagram" ? "Instagram" : requestSocialPlatform === "facebook" ? "Facebook" : "Otra";
+		if (!messageText) {
+			setMessage("Escribe un mensaje para enviar la solicitud.");
+			return;
+		}
+		if (!socialText) {
+			setMessage("Completa una red social de contacto.");
+			return;
+		}
+
+		setAssigningLugId(requestTargetLugId);
+		setMessage(null);
+		try {
+			const supabase = getSupabaseClient();
+			const { error } = await supabase.from("lug_join_requests").insert({
+				lug_id: requestTargetLugId,
+				requester_user_id: userId,
+				status: "pending",
+				request_message: messageText,
+				requester_social_contact: `${socialPlatformLabel}: ${socialText}`,
+			});
+			if (error) {
+				if ((error.message || "").toLowerCase().includes("duplicate")) {
+					setMessage("Ya tienes una solicitud pendiente de ingreso a un LUG.");
+				} else {
+					setMessage(`No se pudo enviar la solicitud: ${error.message}`);
+				}
+				return;
+			}
+
+			await loadOwnPendingJoinRequest(userId);
 			setShowCreateLugInline(false);
-			setMessage("LUG asignado correctamente.");
+			setShowRequestMessageModal(false);
+			setRequestTargetLugId("");
+			setRequestTargetLugName("");
+			setRequestMessageInput("");
+			setRequestSocialPlatform("instagram");
+			setRequestSocialInput("");
+			setMessage("Solicitud enviada. Los administradores del LUG recibiran una alerta.");
 		} finally {
 			setAssigningLugId(null);
+		}
+	}
+
+	async function loadPendingJoinRequests() {
+		if (!currentLugId || !currentUserCanManageLugMembers) {
+			setPendingJoinRequests([]);
+			return;
+		}
+
+		setLoadingJoinRequests(true);
+		try {
+			const supabase = getSupabaseClient();
+			const { data, error } = await supabase.rpc("get_lug_join_requests_public", { p_lug_id: currentLugId });
+
+			if (error) {
+				setPendingJoinRequests([]);
+				setMessage(`No se pudieron cargar solicitudes: ${error.message}`);
+				return;
+			}
+
+			setPendingJoinRequests((data as PendingJoinRequestRow[] | null) ?? []);
+		} finally {
+			setLoadingJoinRequests(false);
+		}
+	}
+
+	async function openJoinRequestsModal() {
+		setShowJoinRequestsModal(true);
+		await loadPendingJoinRequests();
+	}
+
+	async function reviewJoinRequest(request: PendingJoinRequestRow, decision: "approved" | "rejected") {
+		if (!currentLugId || !currentUserCanManageLugMembers || !request.id) return;
+		setProcessingJoinRequestId(request.id);
+		setMessage(null);
+
+		try {
+			const supabase = getSupabaseClient();
+
+			if (decision === "approved") {
+				const requesterId = String(request.requester_user_id ?? "").trim();
+				if (!requesterId) {
+					setMessage("Solicitud invalida: falta usuario solicitante.");
+					return;
+				}
+
+				await supabase.from("lug_memberships").delete().eq("user_id", requesterId);
+				const { error: upsertMembershipError } = await supabase.from("lug_memberships").upsert(
+					{ lug_id: currentLugId, user_id: requesterId, role: "member" },
+					{ onConflict: "lug_id,user_id" },
+				);
+				if (upsertMembershipError) {
+					setMessage(`No se pudo aprobar solicitud: ${upsertMembershipError.message}`);
+					return;
+				}
+			}
+
+			const { error: updateError } = await supabase
+				.from("lug_join_requests")
+				.update({ status: decision, reviewed_by: userId || null, reviewed_at: new Date().toISOString() })
+				.eq("id", request.id);
+
+			if (updateError) {
+				setMessage(`No se pudo actualizar solicitud: ${updateError.message}`);
+				return;
+			}
+
+			await loadPendingJoinRequests();
+			setPendingJoinAlertsCount((current) => (current > 0 ? current - 1 : 0));
+			setMessage(decision === "approved" ? "Solicitud aprobada." : "Solicitud rechazada.");
+		} finally {
+			setProcessingJoinRequestId(null);
 		}
 	}
 
@@ -1338,6 +1561,9 @@ export default function DashboardPage() {
 			setCurrentLugName("");
 			setCurrentLugPrimaryColor("#0093DD");
 			setCurrentUserCanManageLugMembers(false);
+			setHasPendingJoinRequest(false);
+			setPendingJoinRequestLugId("");
+			setPendingJoinRequestLugName("");
 			return "";
 		}
 
@@ -1385,6 +1611,9 @@ export default function DashboardPage() {
 			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
 			setCurrentLugName(String((lug as Record<string, unknown> | null)?.name ?? "").trim());
 			setCurrentLugPrimaryColor(String((lug as Record<string, unknown> | null)?.primary_color ?? "#0093DD") || "#0093DD");
+			setHasPendingJoinRequest(false);
+			setPendingJoinRequestLugId("");
+			setPendingJoinRequestLugName("");
 			const createdBy = String((lug as Record<string, unknown> | null)?.created_by ?? "").trim().toLowerCase();
 			const isMaster = masterOverride || userEmail.trim().toLowerCase() === MASTER_EMAIL;
 			const isCreator = createdBy.length > 0 && createdBy === targetUserId.trim().toLowerCase();
@@ -1397,6 +1626,9 @@ export default function DashboardPage() {
 			setCurrentLugName("");
 			setCurrentLugPrimaryColor("#0093DD");
 			setCurrentUserCanManageLugMembers(false);
+			setHasPendingJoinRequest(false);
+			setPendingJoinRequestLugId("");
+			setPendingJoinRequestLugName("");
 			return "";
 		}
 	}
@@ -1492,8 +1724,19 @@ export default function DashboardPage() {
 		}
 	}
 
-	function changeLug() {
-		setMessage("Cambio de LUG: lo hacemos en el siguiente paso del onboarding.");
+	async function changeLug() {
+		if (!userId) {
+			setMessage("No se pudo iniciar cambio de LUG.");
+			return;
+		}
+
+		setShowLugModal(false);
+		setShowUserSettings(false);
+		resetNewLugPanelState();
+		setMessage(null);
+		await loadOwnPendingJoinRequest(userId);
+		await loadLugsDirectoryRows();
+		setShowNewLugAssignmentModal(true);
 	}
 
 	function openUserSettings() {
@@ -1738,6 +1981,38 @@ export default function DashboardPage() {
 		);
 	}
 
+	useEffect(() => {
+		if (!currentLugId || !currentUserCanManageLugMembers) {
+			setPendingJoinAlertsCount(0);
+			return;
+		}
+
+		let cancelled = false;
+		const readPendingCount = async () => {
+			try {
+				const supabase = getSupabaseClient();
+				const { count } = await supabase
+					.from("lug_join_requests")
+					.select("id", { count: "exact", head: true })
+					.eq("lug_id", currentLugId)
+					.eq("status", "pending");
+				if (!cancelled) setPendingJoinAlertsCount(Number(count ?? 0));
+			} catch {
+				if (!cancelled) setPendingJoinAlertsCount(0);
+			}
+		};
+
+		void readPendingCount();
+		const intervalId = window.setInterval(() => {
+			void readPendingCount();
+		}, 10000);
+
+		return () => {
+			cancelled = true;
+			window.clearInterval(intervalId);
+		};
+	}, [currentLugId, currentUserCanManageLugMembers]);
+
 	if (loading) {
 		return (
 			<div className="bg-lego-tile font-chewy flex min-h-screen items-center justify-center px-6 text-center text-2xl text-white sm:text-3xl">
@@ -1807,7 +2082,26 @@ export default function DashboardPage() {
 									</button>
 								) : null}
 							</div>
-							<div className="flex shrink-0 flex-col items-end gap-1">
+							<div className="flex shrink-0 items-center justify-end gap-2">
+								{currentUserCanManageLugMembers && pendingJoinAlertsCount > 0 ? (
+									<div className="relative" title="Solicitudes de ingreso al LUG">
+										<button
+											type="button"
+											onClick={() => void openJoinRequestsModal()}
+											className="inline-flex h-16 w-16 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+										>
+											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-10 w-10" aria-hidden="true">
+												<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h15A1.5 1.5 0 0 1 21 7.5v9A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5v-9Z" />
+												<path d="m4 7 8 6 8-6" />
+											</svg>
+										</button>
+										{pendingJoinAlertsCount > 0 ? (
+											<span className="absolute -right-2 -top-2 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold leading-none text-white">
+												{pendingJoinAlertsCount > 9 ? "9+" : pendingJoinAlertsCount}
+											</span>
+										) : null}
+									</div>
+								) : null}
 								<img src={getFaceImagePath(selectedFace)} alt="Avatar minifig" className="h-20 w-20 object-contain" />
 							</div>
 						</div>
@@ -1933,7 +2227,7 @@ export default function DashboardPage() {
 
 					<div className="flex flex-col gap-4">
 						<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
-							<div className="flex justify-center">
+							<div className="relative flex justify-center">
 								{currentLugId && currentLugLogoUrl ? <img src={currentLugLogoUrl} alt={currentLugName ? `Logo ${currentLugName}` : "Logo LUG"} className="h-32 w-auto max-w-[420px] object-contain" /> : null}
 							</div>
 							<p className="mt-2 text-sm text-slate-600">Revisa listas publicas de otros usuarios.</p>
@@ -2050,6 +2344,9 @@ export default function DashboardPage() {
 									) : null}
 								</div>
 								<p className="mt-1 text-sm text-slate-600">Necesitas elegir un LUG para continuar en el dashboard.</p>
+								{hasPendingJoinRequest ? (
+									<p className="mt-1 text-xs font-semibold text-amber-700">Tienes una solicitud pendiente{pendingJoinRequestLugName ? ` para ${pendingJoinRequestLugName}` : ""}.</p>
+								) : null}
 							</div>
 
 							<div className="mt-3 max-h-[52vh] space-y-2 overflow-auto pr-1">
@@ -2073,11 +2370,11 @@ export default function DashboardPage() {
 												<p className="text-xs text-slate-600">{lug.users_count} usuarios</p>
 												<button
 													type="button"
-													onClick={() => void assignCurrentUserToLug(lug.id)}
-													disabled={assigningLugId !== null || creatingLug}
+													onClick={() => void requestCurrentUserToLug(lug.id, lug.name)}
+													disabled={assigningLugId !== null || creatingLug || (hasPendingJoinRequest && pendingJoinRequestLugId !== lug.id)}
 													className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
 												>
-													{assigningLugId === lug.id ? "Asignando..." : "Elegir"}
+													{assigningLugId === lug.id ? "Procesando..." : hasPendingJoinRequest && pendingJoinRequestLugId === lug.id ? "Pendiente" : "Solicitar ingreso"}
 												</button>
 											</div>
 										</div>
@@ -2164,6 +2461,69 @@ export default function DashboardPage() {
 										</div>
 									</div>
 								) : null}
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showRequestMessageModal ? (
+					<div className="fixed inset-0 z-[71] flex items-center justify-center bg-slate-900/55 p-4" onClick={() => setShowRequestMessageModal(false)}>
+						<div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Solicitar ingreso a {requestTargetLugName || "LUG"}</h3>
+							</div>
+							<div className="mt-3 space-y-3">
+								<div>
+									<label className="block text-xs font-semibold text-slate-700" htmlFor="join-request-message">
+										Mensaje
+									</label>
+									<textarea
+										id="join-request-message"
+										rows={3}
+										value={requestMessageInput}
+										onChange={(event) => setRequestMessageInput(event.target.value)}
+										placeholder="Hola, me gustaria sumarme al LUG..."
+										className="mt-1 w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500"
+									/>
+								</div>
+								<div>
+									<label className="block text-xs font-semibold text-slate-700" htmlFor="join-request-social">
+										Red social
+									</label>
+									<div className="mt-1 grid grid-cols-[140px_1fr] gap-2">
+										<select
+											id="join-request-social-platform"
+											value={requestSocialPlatform}
+											onChange={(event) => setRequestSocialPlatform(event.target.value as "instagram" | "facebook" | "other")}
+											className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500"
+										>
+											<option value="instagram">Instagram</option>
+											<option value="facebook">Facebook</option>
+											<option value="other">Otra</option>
+										</select>
+										<input
+											id="join-request-social"
+											type="text"
+											value={requestSocialInput}
+											onChange={(event) => setRequestSocialInput(event.target.value)}
+											placeholder="@tu_usuario"
+											className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500"
+										/>
+									</div>
+								</div>
+								<div className="flex items-center justify-end gap-2 pt-1">
+									<button type="button" onClick={() => setShowRequestMessageModal(false)} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+										Cancelar
+									</button>
+									<button
+										type="button"
+										onClick={() => void submitLugJoinRequest()}
+										disabled={assigningLugId !== null || requestMessageInput.trim().length === 0 || requestSocialInput.trim().length === 0}
+										className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+									>
+										{assigningLugId ? "Enviando..." : "Enviar"}
+									</button>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -2564,6 +2924,65 @@ export default function DashboardPage() {
 					</div>
 				) : null}
 
+				{showJoinRequestsModal ? (
+					<div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowJoinRequestsModal(false)}>
+						<div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+								<h3 className="text-xl font-semibold text-slate-900">Solicitudes de ingreso ({pendingJoinRequests.length})</h3>
+								<button
+									type="button"
+									onClick={() => setShowJoinRequestsModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+
+							<div className="mt-3 max-h-[60vh] space-y-2 overflow-auto pr-1">
+								{loadingJoinRequests ? (
+									<p className="text-sm text-slate-600">Cargando solicitudes...</p>
+								) : pendingJoinRequests.length === 0 ? (
+									<p className="text-sm text-slate-600">No hay solicitudes pendientes.</p>
+								) : (
+									pendingJoinRequests.map((request) => (
+										<div key={request.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+											<div className="flex items-center justify-between gap-3">
+												<div>
+													<p className="font-semibold text-slate-900">{request.requester_display_name || "Usuario"}</p>
+													<p className="mt-0.5 inline-flex items-center gap-1 text-xs text-slate-700">
+														{request.requester_social_platform === "instagram" || request.requester_social_platform === "facebook" ? <SocialIcon platform={request.requester_social_platform} className="h-4 w-4" /> : null}
+														<span>{request.requester_social_contact || (request.requester_social_handle ? `@${request.requester_social_handle}` : "-")}</span>
+													</p>
+													{request.request_message ? <p className="mt-0.5 text-xs text-slate-700">"{request.request_message}"</p> : null}
+													<p className="text-xs text-slate-600">{new Date(request.created_at).toLocaleString()}</p>
+												</div>
+												<div className="flex items-center gap-2">
+													<button
+														type="button"
+														onClick={() => void reviewJoinRequest(request, "approved")}
+														disabled={processingJoinRequestId !== null}
+														className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+													>
+														{processingJoinRequestId === request.id ? "Procesando..." : "Aceptar"}
+													</button>
+													<button
+														type="button"
+														onClick={() => void reviewJoinRequest(request, "rejected")}
+														disabled={processingJoinRequestId !== null}
+														className="rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+													>
+														{processingJoinRequestId === request.id ? "Procesando..." : "Rechazar"}
+													</button>
+												</div>
+											</div>
+										</div>
+									))
+								)}
+							</div>
+						</div>
+					</div>
+				) : null}
+
 				{showLugsDirectoryModal ? (
 					<div className="fixed inset-0 z-[53] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowLugsDirectoryModal(false)}>
 						<div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
@@ -2829,7 +3248,7 @@ export default function DashboardPage() {
 								) : (
 									<button
 										type="button"
-										onClick={changeLug}
+										onClick={() => void changeLug()}
 										className="rounded-md bg-[#006eb2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
 									>
 										Cambiar de LUG
