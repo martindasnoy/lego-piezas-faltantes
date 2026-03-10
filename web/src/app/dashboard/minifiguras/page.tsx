@@ -15,6 +15,7 @@ const MINIFIGURAS_PARTS_UNCHECKED_KEY = "minifiguras_parts_unchecked";
 const MINIFIGURAS_MISSING_PARTS_KEY = "minifiguras_missing_parts";
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
+const FIGURE_BATCH_SIZE = 20;
 
 type MinifigureTheme = {
 	id: number;
@@ -206,6 +207,7 @@ export default function MinifigurasPage() {
 	const partsPersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const allFiguresLoadedForSearchRef = useRef(false);
 	const [loadingAllFiguresForSearch, setLoadingAllFiguresForSearch] = useState(false);
+	const [visibleCardsLimit, setVisibleCardsLimit] = useState(FIGURE_BATCH_SIZE);
 
 	function getFigureKey(themeId: number, figureName: string) {
 		return `${themeId}:${figureName.trim().toLowerCase()}`;
@@ -1246,22 +1248,34 @@ export default function MinifigurasPage() {
 			: "";
 
 	useEffect(() => {
+		setVisibleCardsLimit(FIGURE_BATCH_SIZE);
+	}, [normalizedSearch, viewMode, missingSeriesFilterThemeId, showOnlyFavoriteFigures, selectedThemeIds]);
+
+	useEffect(() => {
+		if (visibleCardsLimit >= visibleCards.length) return;
+		const timeoutId = window.setTimeout(() => {
+			setVisibleCardsLimit((current) => Math.min(current + FIGURE_BATCH_SIZE, visibleCards.length));
+		}, 140);
+		return () => window.clearTimeout(timeoutId);
+	}, [visibleCards.length, visibleCardsLimit]);
+
+	useEffect(() => {
 		const previewItems: PartImageRequestItem[] = [];
-		for (const figure of visibleCards) {
+		for (const figure of visibleCards.slice(0, visibleCardsLimit)) {
 			const missing = (missingPartsByFigureKey[figure.figureKey] ?? []).slice(0, 3);
 			for (const part of missing) {
 				previewItems.push({ part_num: part.part_num, color_name: part.color_name });
 			}
 		}
 		void loadMissingPartImages(previewItems);
-	}, [visibleCards, missingPartsByFigureKey]);
+	}, [visibleCards, visibleCardsLimit, missingPartsByFigureKey]);
 
-	const renderFigureCard = (figure: (typeof visibleCards)[number]) => {
+	const renderFigureCard = (figure: (typeof visibleCards)[number], shouldLoadImages: boolean) => {
 		const isOwned = ownedByFigureKey[figure.figureKey] === true;
 		const isFavoriteFigure = favoriteByFigureKey[figure.figureKey] === true;
 		const totalMissingCount = missingPartsByFigureKey[figure.figureKey]?.length ?? 0;
 		const hasMissingPieces = totalMissingCount > 0;
-		const missingPreview = (missingPartsByFigureKey[figure.figureKey] ?? []).slice(0, 3);
+		const missingPreview = shouldLoadImages ? (missingPartsByFigureKey[figure.figureKey] ?? []).slice(0, 3) : [];
 		const shouldShowMissingCountTile = totalMissingCount > 3;
 		const imagePreviewParts = shouldShowMissingCountTile ? missingPreview.slice(0, 2) : missingPreview;
 		const cardTone = !isOwned ? "base" : hasMissingPieces ? "owned-light" : "owned-dark";
@@ -1311,7 +1325,7 @@ export default function MinifigurasPage() {
 							<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A5.98 5.98 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
 						</svg>
 					</button>
-					{figure.imageUrl ? (
+					{shouldLoadImages && figure.imageUrl ? (
 						<button
 							type="button"
 							onClick={() => openImageZoom(figure.imageUrl ?? "", figure.name)}
@@ -1320,6 +1334,8 @@ export default function MinifigurasPage() {
 						>
 							<img src={figure.imageUrl} alt={figure.name} loading="lazy" className={mainImageClass} />
 						</button>
+					) : !shouldLoadImages ? (
+						<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Cargando...</div>
 					) : (
 						<div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">Sin imagen</div>
 					)}
@@ -1469,7 +1485,7 @@ export default function MinifigurasPage() {
 							<p className="text-sm text-slate-700">No se encontraron minifiguras para "{searchInput.trim()}".</p>
 						) : (
 							<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-5">
-								{visibleCards.map((figure) => renderFigureCard(figure))}
+								{visibleCards.map((figure, index) => renderFigureCard(figure, index < visibleCardsLimit))}
 							</div>
 						)
 					) : selectedThemeIds.length === 0 ? (
@@ -1478,9 +1494,10 @@ export default function MinifigurasPage() {
 						<p className="text-sm text-slate-700">Cargando minifiguras seleccionadas...</p>
 					) : (
 						<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-5">
-							{visibleCards.map((figure) => renderFigureCard(figure))}
+							{visibleCards.map((figure, index) => renderFigureCard(figure, index < visibleCardsLimit))}
 						</div>
 					)}
+					{visibleCards.length > 0 ? <p className="mt-3 text-center text-xs text-slate-600">Imagenes cargadas: {Math.min(visibleCardsLimit, visibleCards.length)} / {visibleCards.length}</p> : null}
 				</div>
 
 				<div className="mt-6 flex justify-end">
