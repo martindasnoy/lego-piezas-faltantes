@@ -2,7 +2,7 @@ name: Catalog Sync (Every 5 Days)
 
 on:
   schedule:
-    - cron: "0 3 */5 * *"
+    - cron: "0 4 3,18 * *"
   workflow_dispatch:
 
 jobs:

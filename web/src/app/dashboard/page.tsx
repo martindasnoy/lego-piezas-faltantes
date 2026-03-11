@@ -14,6 +14,7 @@ const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
 const SALE_LIST_PREFIX = "Venta: ";
 const MASTER_EMAIL = "martindasnoy@gmail.com";
+const REGISTRATION_MAIL_SUBJECT = "Confirm your signup";
 const FACE_TOTAL = 20;
 const CMF_CHECK_HISTORY_KEY = "master_cmf_update_checks_v1";
 const PIECES_CHECK_HISTORY_KEY = "master_pieces_update_checks_v1";
@@ -227,6 +228,8 @@ export default function DashboardPage() {
 	const [requestSocialInput, setRequestSocialInput] = useState("");
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [showMasterModal, setShowMasterModal] = useState(false);
+	const [showRegistrationMailModal, setShowRegistrationMailModal] = useState(false);
+	const [registrationMailBody, setRegistrationMailBody] = useState("");
 	const [showMasterUsersModal, setShowMasterUsersModal] = useState(false);
 	const [showCacheImagesModal, setShowCacheImagesModal] = useState(false);
 	const [showUpdatesModal, setShowUpdatesModal] = useState(false);
@@ -240,6 +243,8 @@ export default function DashboardPage() {
 	const [cmfCheckLogs, setCmfCheckLogs] = useState<CmfCheckLog[]>([]);
 	const [checkingPieces, setCheckingPieces] = useState(false);
 	const [piecesProgressText, setPiecesProgressText] = useState("");
+	const [repairingListPartNums, setRepairingListPartNums] = useState(false);
+	const [repairListPartNumsProgressText, setRepairListPartNumsProgressText] = useState("");
 	const [piecesCheckLogs, setPiecesCheckLogs] = useState<PiecesCheckLog[]>([]);
 	const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
 	const [maintenanceText, setMaintenanceText] = useState("");
@@ -522,6 +527,39 @@ export default function DashboardPage() {
 			setRegisteredUsers((data as RegisteredUserRow[] | null) ?? []);
 		} finally {
 			setLoadingRegisteredUsers(false);
+		}
+	}
+
+	function getDefaultRegistrationMailBody() {
+		return [
+			"Hola {{ .Email }},",
+			"",
+			"Para confirmar tu registro en LEGO Piezas Faltantes, hace click en el siguiente enlace:",
+			"{{ .ConfirmationURL }}",
+			"",
+			"Si vos no solicitaste este registro, podes ignorar este mail.",
+			"",
+			"By Martin Dasnoy",
+		].join("\n");
+	}
+
+	function openRegistrationMailDraft() {
+		setRegistrationMailBody(getDefaultRegistrationMailBody());
+		setShowRegistrationMailModal(true);
+	}
+
+	async function sendRegistrationMailDraft() {
+		const body = registrationMailBody.trim().length > 0 ? registrationMailBody : getDefaultRegistrationMailBody();
+		if (typeof window === "undefined") return;
+		try {
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(body);
+				setMessage("Template de Confirm Signup copiado. Pegalo en Supabase > Auth > Email Templates.");
+			} else {
+				setMessage("No se pudo copiar automaticamente. Copialo manualmente desde el popup.");
+			}
+		} catch {
+			setMessage("No se pudo copiar automaticamente. Copialo manualmente desde el popup.");
 		}
 	}
 
@@ -1285,6 +1323,60 @@ export default function DashboardPage() {
 		} finally {
 			setPiecesProgressText("");
 			setCheckingPieces(false);
+		}
+	}
+
+	async function repairLegacyListPartNums() {
+		if (!isMasterUser || repairingListPartNums) return;
+		setRepairingListPartNums(true);
+		setRepairListPartNumsProgressText("Escaneando listas...");
+		setMessage(null);
+
+		try {
+			let offset = 0;
+			let total = 0;
+			let totalScanned = 0;
+			let totalRepaired = 0;
+			let totalUnmatched = 0;
+
+			for (let i = 0; i < 400; i += 1) {
+				const response = await fetch("/api/system/catalog/repair-list-partnums", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ offset, batch_size: 200 }),
+				});
+
+				const payload = (await response.json()) as {
+					error?: string;
+					total?: number;
+					scanned?: number;
+					repaired?: number;
+					unmatched?: number;
+					next_offset?: number | null;
+					done?: boolean;
+				};
+
+				if (!response.ok) {
+					throw new Error(payload.error ?? "No se pudo reparar part_num legacy.");
+				}
+
+				total = Math.max(total, Number(payload.total ?? 0));
+				totalScanned += Number(payload.scanned ?? 0);
+				totalRepaired += Number(payload.repaired ?? 0);
+				totalUnmatched += Number(payload.unmatched ?? 0);
+
+				if (payload.done) break;
+				offset = Number(payload.next_offset ?? offset + 200);
+				setRepairListPartNumsProgressText(`Reparando listas... offset ${offset} / ${total || "?"}`);
+			}
+
+			setMessage(`Repair listas OK: revisados ${totalScanned}, reparados ${totalRepaired}, sin match ${totalUnmatched}.`);
+		} catch (error) {
+			const text = error instanceof Error ? error.message : "No se pudo ejecutar repair de listas.";
+			setMessage(text);
+		} finally {
+			setRepairListPartNumsProgressText("");
+			setRepairingListPartNums(false);
 		}
 	}
 
@@ -2610,8 +2702,21 @@ export default function DashboardPage() {
 									>
 										Ver popNewLUG
 									</button>
+									</div>
 								</div>
-							</div>
+
+								<div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+									<p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Comunicacion</p>
+									<div className="space-y-2">
+										<button
+											type="button"
+											onClick={openRegistrationMailDraft}
+											className="flex w-full items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
+										>
+											Mail de registro
+										</button>
+									</div>
+								</div>
 
 								<div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
 									<p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Updates</p>
@@ -2632,6 +2737,46 @@ export default function DashboardPage() {
 										</button>
 									</div>
 								</div>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				{showRegistrationMailModal ? (
+					<div className="fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setShowRegistrationMailModal(false)}>
+						<div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+							<div className="flex items-center justify-between border-b border-slate-200 pb-2">
+							<h3 className="text-xl font-semibold text-slate-900">Template Confirm Signup</h3>
+								<button
+									type="button"
+									onClick={() => setShowRegistrationMailModal(false)}
+									className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+								>
+									Cerrar
+								</button>
+							</div>
+							<p className="mt-3 text-xs text-slate-600">Asunto: {REGISTRATION_MAIL_SUBJECT}</p>
+							<textarea
+								value={registrationMailBody}
+								onChange={(event) => setRegistrationMailBody(event.target.value)}
+								rows={9}
+								className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+							/>
+							<div className="mt-3 flex justify-end gap-2">
+								<button
+									type="button"
+									onClick={() => setShowRegistrationMailModal(false)}
+									className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+								>
+									Cancelar
+								</button>
+								<button
+									type="button"
+									onClick={sendRegistrationMailDraft}
+									className="rounded-md border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a]"
+								>
+									Copiar template
+								</button>
 							</div>
 						</div>
 					</div>
@@ -2712,16 +2857,25 @@ export default function DashboardPage() {
 										<div className="rounded-lg border border-slate-300 bg-white p-3">
 											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Update piezas</p>
 											<p className="mt-1 text-xs text-slate-600">Chequea categorias nuevas, piezas nuevas y agrega variantes de imagenes en DB.</p>
-											<button
-												type="button"
-												onClick={() => void checkNewPiecesThings()}
-												disabled={checkingPieces}
-												className="mt-3 inline-flex items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
-											>
-												{checkingPieces ? "Running..." : "Run update"}
-											</button>
-											{piecesProgressText ? <p className="mt-2 text-xs text-slate-600">{piecesProgressText}</p> : null}
-										</div>
+										<button
+											type="button"
+											onClick={() => void checkNewPiecesThings()}
+											disabled={checkingPieces}
+											className="mt-3 inline-flex items-center justify-center rounded-lg border border-[#006eb2] bg-[#006eb2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#005f9a] disabled:opacity-50"
+										>
+											{checkingPieces ? "Running..." : "Run update"}
+										</button>
+										<button
+											type="button"
+											onClick={() => void repairLegacyListPartNums()}
+											disabled={repairingListPartNums}
+											className="mt-2 inline-flex items-center justify-center rounded-lg border border-amber-600 bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+										>
+											{repairingListPartNums ? "Reparando..." : "Repair part_num en listas"}
+										</button>
+										{piecesProgressText ? <p className="mt-2 text-xs text-slate-600">{piecesProgressText}</p> : null}
+										{repairListPartNumsProgressText ? <p className="mt-2 text-xs text-slate-600">{repairListPartNumsProgressText}</p> : null}
+									</div>
 
 										<div className="rounded-lg border border-slate-300 bg-white p-3">
 											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ultimos checks</p>

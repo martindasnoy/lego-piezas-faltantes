@@ -2,7 +2,7 @@ name: Minifig Sync (Every 10 Days)
 
 on:
   schedule:
-    - cron: "0 4 */10 * *"
+    - cron: "0 4 9,24 * *"
   workflow_dispatch:
 
 jobs:

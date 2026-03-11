@@ -2,7 +2,7 @@ name: Pieces Sync (Every 10 Days)
 
 on:
   schedule:
-    - cron: "0 5 */10 * *"
+    - cron: "0 4 6,21 * *"
   workflow_dispatch:
 
 jobs:
