@@ -929,6 +929,12 @@ export default function ListDetailPage() {
 		return `${partNum.trim()}::${normalizedColor}`;
 	}
 
+	function getBestPartImageUrl(partNum: string, colorName: string | null | undefined) {
+		const byColor = partImages[getPartImageKey(partNum, colorName)];
+		if (byColor) return byColor;
+		return partImages[getPartImageKey(partNum, null)] ?? null;
+	}
+
 	async function loadPartImages(items: PartImageRequestItem[]) {
 		const normalizedItems = items
 			.map((item) => ({
@@ -937,10 +943,16 @@ export default function ListDetailPage() {
 			}))
 			.filter((item) => item.part_num.length > 0);
 
-		if (normalizedItems.length === 0) return;
+		const expandedItems: Array<{ part_num: string; color_name: string | null }> = [];
+		for (const item of normalizedItems) {
+			expandedItems.push(item);
+			expandedItems.push({ part_num: item.part_num, color_name: null });
+		}
+
+		if (expandedItems.length === 0) return;
 
 		const uniqueByKey = new Map<string, PartImageRequestItem>();
-		for (const item of normalizedItems) {
+		for (const item of expandedItems) {
 			const key = getPartImageKey(item.part_num, item.color_name);
 			if (!uniqueByKey.has(key)) {
 				uniqueByKey.set(key, item);
@@ -1631,7 +1643,7 @@ export default function ListDetailPage() {
 				const colorText = getTextColorForBackground(colorHex);
 				const qty = Math.max(1, Number(lot.quantity || 1));
 				const imageKey = getPartImageKey(lot.part_num, lot.color_name);
-				const imageUrl = pdfImagesByKey[imageKey];
+				const imageUrl = pdfImagesByKey[imageKey] ?? pdfImagesByKey[getPartImageKey(lot.part_num, null)] ?? null;
 				const imageCell = imageUrl
 					? `<img src="${escapeHtml(imageUrl)}" alt="${name}" class="part-image"/>`
 					: `<div class="part-image empty">Imagen sin cache</div>`;
@@ -2189,9 +2201,9 @@ export default function ListDetailPage() {
 											</button>
 										) : null}
 										<div className="flex w-16 shrink-0 flex-col items-center gap-1">
-											{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
+											{getBestPartImageUrl(lot.part_num, lot.color_name) ? (
 												<img
-													src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
+													src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
 													alt={lot.part_name || lot.part_num}
 													loading="lazy"
 													decoding="async"
