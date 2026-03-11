@@ -15,6 +15,8 @@ import matchIconAnimation from "@/lib/match-icon.json";
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
 const SALE_LIST_PREFIX = "venta:";
+const SEARCH_LOADING_ANIMATION_PATH = "/Lego%20Spinner.json";
+const SUGGESTIONS_PAGE_SIZE = 15;
 
 type ListInfo = {
 	id: string;
@@ -98,6 +100,45 @@ type RegisteredUserLookupRow = {
 	email: string;
 };
 
+function hexToRgb01(hexColor: string) {
+	const normalized = hexColor.trim().replace(/^#/, "");
+	const full = normalized.length === 3 ? normalized.split("").map((ch) => `${ch}${ch}`).join("") : normalized;
+	if (!/^[0-9a-fA-F]{6}$/.test(full)) return [0, 0.431, 0.698] as const;
+	const r = Number.parseInt(full.slice(0, 2), 16) / 255;
+	const g = Number.parseInt(full.slice(2, 4), 16) / 255;
+	const b = Number.parseInt(full.slice(4, 6), 16) / 255;
+	return [r, g, b] as const;
+}
+
+function recolorLottieData(animationData: object, hexColor: string) {
+	const [r, g, b] = hexToRgb01(hexColor);
+	const clone = structuredClone(animationData) as Record<string, unknown>;
+
+	const walk = (node: unknown) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const item of node) walk(item);
+			return;
+		}
+
+		const obj = node as Record<string, unknown>;
+		if (obj.c && typeof obj.c === "object" && !Array.isArray(obj.c)) {
+			const colorNode = obj.c as Record<string, unknown>;
+			if (Array.isArray(colorNode.k) && colorNode.k.length >= 3 && colorNode.k.every((v) => typeof v === "number")) {
+				const alpha = typeof colorNode.k[3] === "number" ? (colorNode.k[3] as number) : 1;
+				colorNode.k = [r, g, b, alpha];
+			}
+		}
+
+		for (const value of Object.values(obj)) {
+			walk(value);
+		}
+	};
+
+	walk(clone);
+	return clone;
+}
+
 export default function ListDetailPage() {
 	const params = useParams<{ id: string }>();
 	const router = useRouter();
@@ -109,8 +150,11 @@ export default function ListDetailPage() {
 	const [partInput, setPartInput] = useState("");
 	const [selectedPart, setSelectedPart] = useState<PartSuggestion | null>(null);
 	const [suggestions, setSuggestions] = useState<PartSuggestion[]>([]);
+	const [suggestionsOffset, setSuggestionsOffset] = useState(0);
+	const [suggestionsHasMore, setSuggestionsHasMore] = useState(false);
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+	const [searchLoadingAnimation, setSearchLoadingAnimation] = useState<object | null>(null);
 	const [colorInput, setColorInput] = useState("");
 	const [availableColors, setAvailableColors] = useState<GobrickColor[]>(gobrickColors);
 	const [selectedColor, setSelectedColor] = useState<GobrickColor | null>(null);
@@ -171,6 +215,27 @@ export default function ListDetailPage() {
 		"X2",
 		"X3",
 	] as const;
+
+	useEffect(() => {
+		let cancelled = false;
+		void fetch(SEARCH_LOADING_ANIMATION_PATH, { cache: "force-cache" })
+			.then(async (response) => {
+				if (!response.ok) return null;
+				return (await response.json()) as object;
+			})
+			.then((payload) => {
+				if (cancelled || !payload) return;
+				setSearchLoadingAnimation(payload);
+			})
+			.catch(() => {
+				if (cancelled) return;
+				setSearchLoadingAnimation(null);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	async function loadCurrentLugColor(userId: string) {
 		if (!userId) {
@@ -251,6 +316,11 @@ export default function ListDetailPage() {
 			})
 			;
 	}, [availableColors, colorInput, useBricklinkNomenclature]);
+
+	const searchLoadingAnimationForLug = useMemo(() => {
+		if (!searchLoadingAnimation) return null;
+		return recolorLottieData(searchLoadingAnimation, currentLugPrimaryColor);
+	}, [searchLoadingAnimation, currentLugPrimaryColor]);
 
 	const activeColorPickerLot = useMemo(() => {
 		if (!colorPickerLotId) return null;
@@ -399,6 +469,8 @@ export default function ListDetailPage() {
 	useEffect(() => {
 		if (selectedPart) {
 			setSuggestions([]);
+			setSuggestionsOffset(0);
+			setSuggestionsHasMore(false);
 			setLoadingSuggestions(false);
 			return;
 		}
@@ -406,6 +478,8 @@ export default function ListDetailPage() {
 		const query = partInput.trim().replace(/^#+\s*/, "");
 		if (query.length < 2) {
 			setSuggestions([]);
+			setSuggestionsOffset(0);
+			setSuggestionsHasMore(false);
 			setLoadingSuggestions(false);
 			return;
 		}
@@ -413,28 +487,41 @@ export default function ListDetailPage() {
 		const timer = setTimeout(async () => {
 			setLoadingSuggestions(true);
 			try {
-				const response = await fetch(`/api/rebrickable/parts?q=${encodeURIComponent(query)}`);
+				const response = await fetch(
+					`/api/rebrickable/parts?q=${encodeURIComponent(query)}&offset=${suggestionsOffset}&limit=${SUGGESTIONS_PAGE_SIZE}`,
+				);
 				const payload = (await response.json()) as {
 					results?: PartSuggestion[];
+					has_more?: boolean;
 					error?: string;
 				};
 
 				if (!response.ok) {
 					setSuggestions([]);
+					setSuggestionsHasMore(false);
 					setMessage(payload.error ?? "No se pudo buscar en el catalogo.");
 					return;
 				}
 
-				setSuggestions(payload.results ?? []);
+				const nextResults = payload.results ?? [];
+				setSuggestionsHasMore(Boolean(payload.has_more));
+				setSuggestions((prev) => {
+					if (suggestionsOffset === 0) return nextResults;
+					const byPart = new Map<string, PartSuggestion>();
+					for (const row of prev) byPart.set(row.part_num, row);
+					for (const row of nextResults) byPart.set(row.part_num, row);
+					return [...byPart.values()];
+				});
 			} catch {
 				setSuggestions([]);
+				setSuggestionsHasMore(false);
 			} finally {
 				setLoadingSuggestions(false);
 			}
 		}, 650);
 
 		return () => clearTimeout(timer);
-	}, [partInput, selectedPart]);
+	}, [partInput, selectedPart, suggestionsOffset]);
 
 	useEffect(() => {
 		setLoadingMessage(getRandomLoadingMessage());
@@ -1662,13 +1749,12 @@ export default function ListDetailPage() {
 								onChange={(event) => {
 									setPartInput(event.target.value);
 									setSelectedPart(null);
+									setSuggestionsOffset(0);
+									setSuggestionsHasMore(false);
 								}}
 								placeholder="Buscar como Brick 1x1 o #3005"
 								className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
 							/>
-							{loadingSuggestions ? (
-								<p className="mt-1 text-xs text-slate-500">Buscando en el catalogo...</p>
-							) : null}
 							{partInput.trim().length > 0 && !selectedPart ? (
 								<p className="mt-1 text-xs text-amber-700">Elige una pieza del desplegable para poder agregarla.</p>
 							) : null}
@@ -1682,6 +1768,8 @@ export default function ListDetailPage() {
 													setSelectedPart(part);
 													setPartInput(`${part.part_num} - ${part.name}`);
 													setSuggestions([]);
+													setSuggestionsOffset(0);
+													setSuggestionsHasMore(false);
 												}}
 												className="flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
 											>
@@ -1697,6 +1785,20 @@ export default function ListDetailPage() {
 											</button>
 										</li>
 									))}
+									{suggestionsHasMore ? (
+										<li>
+											<button
+												type="button"
+												onClick={() => {
+													if (loadingSuggestions) return;
+													setSuggestionsOffset((prev) => prev + SUGGESTIONS_PAGE_SIZE);
+												}}
+												className="flex w-full items-center justify-center border-t border-slate-200 bg-[#006eb2] px-3 py-2 text-2xl font-semibold text-white hover:bg-[#005f9a]"
+											>
+												+
+											</button>
+										</li>
+									) : null}
 								</ul>
 							) : null}
 						</div>
@@ -1816,6 +1918,18 @@ export default function ListDetailPage() {
 						</div>
 					</form>
 				</section>
+				) : null}
+
+				{loadingSuggestions ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4">
+						<div className="w-full max-w-xs rounded-2xl bg-white p-4 shadow-2xl">
+							{searchLoadingAnimationForLug ? (
+								<Lottie animationData={searchLoadingAnimationForLug} loop className="mx-auto h-36 w-36" />
+							) : (
+								<div className="mx-auto h-24 w-24 animate-spin rounded-full border-4 border-slate-200 border-t-slate-500" />
+							)}
+						</div>
+					</div>
 				) : null}
 
 				<button
