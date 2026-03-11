@@ -436,9 +436,10 @@ export default function PoolPage() {
 
 	function isUsingGenericPartImage(partNum: string, colorName: string | null | undefined) {
 		const byColor = partImages[getPartImageKey(partNum, colorName)];
-		if (byColor) return false;
 		const byGeneric = partImages[getPartImageKey(partNum, null)];
-		return Boolean(byGeneric);
+		if (!byColor) return Boolean(byGeneric);
+		if (!isNoColorSelected(colorName) && byGeneric && byColor === byGeneric) return true;
+		return false;
 	}
 
 	function isNoColorSelected(colorName: string | null | undefined) {
