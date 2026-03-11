@@ -10,6 +10,12 @@ import { getRandomLoadingMessage } from "@/lib/loading-messages";
 import { categoryMatchesFilter, type CatalogFilter } from "@/lib/rebrickable-category-flags";
 import { enforceSessionTtl } from "@/lib/session-ttl";
 import { canAccessModule } from "@/lib/feature-flags";
+import {
+	getCachedSuggestionPage,
+	saveSuggestionPage,
+	saveSuggestionPartsBulk,
+	searchLocalSuggestionParts,
+} from "@/lib/part-suggestions-cache";
 import matchIconAnimation from "@/lib/match-icon.json";
 
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
@@ -17,6 +23,9 @@ const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltan
 const SALE_LIST_PREFIX = "venta:";
 const SEARCH_LOADING_ANIMATION_PATH = "/Lego%20Spinner.json";
 const SUGGESTIONS_PAGE_SIZE = 15;
+const SEARCH_PREWARM_STORAGE_KEY = "parts-search-prewarm-v1";
+const SEARCH_PREWARM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const SEARCH_PREWARM_CATEGORY_IDS = [19, 67, 15, 14, 11] as const;
 
 type ListInfo = {
 	id: string;
@@ -234,6 +243,56 @@ export default function ListDetailPage() {
 
 		return () => {
 			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const lastRun = Number(window.localStorage.getItem(SEARCH_PREWARM_STORAGE_KEY) ?? "0");
+		if (Number.isFinite(lastRun) && Date.now() - lastRun < SEARCH_PREWARM_COOLDOWN_MS) return;
+
+		let cancelled = false;
+
+		const runPrewarm = async () => {
+			try {
+				const categoriesResponse = await fetch("/api/rebrickable/categories", { cache: "force-cache" });
+				const categoriesPayload = (await categoriesResponse.json()) as { results?: CatalogCategory[] };
+				if (!categoriesResponse.ok) return;
+
+				const availableCategoryIds = new Set((categoriesPayload.results ?? []).map((row) => Number(row.id)));
+				const selectedCategoryIds = SEARCH_PREWARM_CATEGORY_IDS.filter((id) => availableCategoryIds.has(id));
+
+				for (const categoryId of selectedCategoryIds) {
+					if (cancelled) return;
+					const response = await fetch(
+						`/api/rebrickable/parts-by-category?category_id=${categoryId}&page=1&page_size=100&include_printed=true&include_non_printed=true`,
+						{ cache: "force-cache" },
+					);
+					if (!response.ok) continue;
+					const payload = (await response.json()) as { results?: Array<{ part_num: string; name: string; part_img_url: string | null }> };
+					const rows = (payload.results ?? []).map((row) => ({
+						part_num: row.part_num,
+						name: row.name,
+						part_img_url: row.part_img_url ?? null,
+					}));
+					await saveSuggestionPartsBulk(rows);
+				}
+
+				if (!cancelled) {
+					window.localStorage.setItem(SEARCH_PREWARM_STORAGE_KEY, String(Date.now()));
+				}
+			} catch {
+				// Silent background prewarm.
+			}
+		};
+
+		const timer = window.setTimeout(() => {
+			void runPrewarm();
+		}, 1800);
+		return () => {
+			cancelled = true;
+			window.clearTimeout(timer);
 		};
 	}, []);
 
@@ -485,7 +544,37 @@ export default function ListDetailPage() {
 		}
 
 		const timer = setTimeout(async () => {
-			setLoadingSuggestions(true);
+			let servedFromCache = false;
+			const cachedPage = await getCachedSuggestionPage(query, suggestionsOffset, SUGGESTIONS_PAGE_SIZE);
+			if (cachedPage) {
+				servedFromCache = true;
+				setSuggestionsHasMore(cachedPage.hasMore);
+				setSuggestions((prev) => {
+					if (suggestionsOffset === 0) return cachedPage.results;
+					const byPart = new Map<string, PartSuggestion>();
+					for (const row of prev) byPart.set(row.part_num, row);
+					for (const row of cachedPage.results) byPart.set(row.part_num, row);
+					return [...byPart.values()];
+				});
+			}
+
+			if (!servedFromCache) {
+				const localResults = await searchLocalSuggestionParts(query, suggestionsOffset, SUGGESTIONS_PAGE_SIZE);
+				if (localResults) {
+					setSuggestionsHasMore(localResults.hasMore);
+					setSuggestions((prev) => {
+						if (suggestionsOffset === 0) return localResults.results;
+						const byPart = new Map<string, PartSuggestion>();
+						for (const row of prev) byPart.set(row.part_num, row);
+						for (const row of localResults.results) byPart.set(row.part_num, row);
+						return [...byPart.values()];
+					});
+				}
+			}
+
+			if (!servedFromCache) {
+				setLoadingSuggestions(true);
+			}
 			try {
 				const response = await fetch(
 					`/api/rebrickable/parts?q=${encodeURIComponent(query)}&offset=${suggestionsOffset}&limit=${SUGGESTIONS_PAGE_SIZE}`,
@@ -505,6 +594,7 @@ export default function ListDetailPage() {
 
 				const nextResults = payload.results ?? [];
 				setSuggestionsHasMore(Boolean(payload.has_more));
+				void saveSuggestionPage(query, suggestionsOffset, SUGGESTIONS_PAGE_SIZE, nextResults, Boolean(payload.has_more));
 				setSuggestions((prev) => {
 					if (suggestionsOffset === 0) return nextResults;
 					const byPart = new Map<string, PartSuggestion>();
@@ -513,8 +603,10 @@ export default function ListDetailPage() {
 					return [...byPart.values()];
 				});
 			} catch {
-				setSuggestions([]);
-				setSuggestionsHasMore(false);
+				if (!servedFromCache && suggestionsOffset === 0) {
+					setSuggestions([]);
+					setSuggestionsHasMore(false);
+				}
 			} finally {
 				setLoadingSuggestions(false);
 			}
