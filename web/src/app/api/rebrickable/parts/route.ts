@@ -6,8 +6,8 @@ import { getCachedCategories, getCachedCategoryAllParts } from "@/lib/rebrickabl
 
 const REMOTE_FALLBACK_BASE_URL = "https://lego-piezas-faltantes.martindasnoy.workers.dev";
 const SEARCH_RESULTS_LIMIT = 16;
-const REBRICKABLE_PAGE_SIZE = 100;
-const REBRICKABLE_MAX_CANDIDATES = 2000;
+const REBRICKABLE_PAGE_SIZE = 50;
+const REBRICKABLE_MAX_CANDIDATES = 600;
 
 type RebrickablePart = {
 	part_num: string;
@@ -472,7 +472,9 @@ export async function GET(request: Request) {
 	const offset = Number(searchParams.get("offset") ?? "0");
 	const limit = Number(searchParams.get("limit") ?? String(SEARCH_RESULTS_LIMIT));
 	const debugMode = searchParams.get("debug") === "1";
- 	const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
+	const requestUrl = new URL(request.url);
+	const skipRemoteFallback = searchParams.get("skip_remote_fallback") === "1";
+  	const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
 	const safeLimit = Number.isFinite(limit) ? Math.min(50, Math.max(1, Math.trunc(limit))) : SEARCH_RESULTS_LIMIT;
 
 	if (query.length < 2) {
@@ -510,39 +512,46 @@ export async function GET(request: Request) {
 		}
 
 		const remoteUrl = new URL(`${REMOTE_FALLBACK_BASE_URL}/api/rebrickable/parts`);
-		remoteUrl.searchParams.set("q", query);
-		if (debugMode) remoteUrl.searchParams.set("debug", "1");
-		try {
-			const remoteResponse = await fetch(remoteUrl.toString(), { cache: "no-store" });
-			if (remoteResponse.ok) {
-				const remotePayload = (await remoteResponse.json()) as {
-					results?: CatalogPartLite[];
-					has_more?: boolean;
-					engine?: string;
-					debug?: Record<string, unknown>;
-				};
-				if (Array.isArray(remotePayload.results) && remotePayload.results.length > 0) {
-					const sliced = remotePayload.results.slice(safeOffset, safeOffset + safeLimit);
-					const hasMore = typeof remotePayload.has_more === "boolean" ? remotePayload.has_more : safeOffset + safeLimit < remotePayload.results.length;
-					const body = debugMode
-						? {
-							results: sliced,
-							has_more: hasMore,
-							engine: "lunr",
-							debug: {
-								normalized_query: normalizedQuery,
-								cache_source: "remote-fallback",
-								remote_engine: remotePayload.engine ?? "unknown",
-							},
-						}
-						: { results: sliced, has_more: hasMore, engine: "lunr" };
-					const out = NextResponse.json(body);
-					out.headers.set("x-search-engine", "lunr");
-					return out;
+		const isSameWorkerOrigin = remoteUrl.origin === requestUrl.origin;
+		if (!skipRemoteFallback && !isSameWorkerOrigin) {
+			remoteUrl.searchParams.set("q", query);
+			remoteUrl.searchParams.set("skip_remote_fallback", "1");
+			if (debugMode) remoteUrl.searchParams.set("debug", "1");
+			try {
+				const remoteResponse = await fetch(remoteUrl.toString(), { cache: "no-store" });
+				if (remoteResponse.ok) {
+					const remotePayload = (await remoteResponse.json()) as {
+						results?: CatalogPartLite[];
+						has_more?: boolean;
+						engine?: string;
+						debug?: Record<string, unknown>;
+					};
+					if (Array.isArray(remotePayload.results) && remotePayload.results.length > 0) {
+						const sliced = remotePayload.results.slice(safeOffset, safeOffset + safeLimit);
+						const hasMore =
+							typeof remotePayload.has_more === "boolean"
+								? remotePayload.has_more
+								: safeOffset + safeLimit < remotePayload.results.length;
+						const body = debugMode
+							? {
+								results: sliced,
+								has_more: hasMore,
+								engine: "lunr",
+								debug: {
+									normalized_query: normalizedQuery,
+									cache_source: "remote-fallback",
+									remote_engine: remotePayload.engine ?? "unknown",
+								},
+							}
+							: { results: sliced, has_more: hasMore, engine: "lunr" };
+						const out = NextResponse.json(body);
+						out.headers.set("x-search-engine", "lunr");
+						return out;
+					}
 				}
+			} catch {
+				// Continue to local API fallback below.
 			}
-		} catch {
-			// Continue to local API fallback below.
 		}
 
 		const apiKey = getRuntimeEnvValue("REBRICKABLE_API_KEY");
