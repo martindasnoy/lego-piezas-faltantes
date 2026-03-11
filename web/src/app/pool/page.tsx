@@ -15,6 +15,7 @@ const AUTO_MINIFIG_LIST_NAMES = [
 	"Faltantes Minifiguras",
 ];
 const SALE_LIST_PREFIX = "venta:";
+const MASTER_EMAIL = "martindasnoy@gmail.com";
 
 type PoolLot = {
 	id: string;
@@ -39,6 +40,7 @@ type RpcPoolLot = PoolLot & {
 
 type PartImageLookup = Record<string, string | null>;
 type PartImageRequestItem = { part_num: string; color_name?: string | null };
+type PartSuggestion = { part_num: string; name: string; part_img_url: string | null };
 type ToggleOfferRpcRow = {
 	action: "created" | "updated" | "deleted";
 	applied_quantity: number;
@@ -57,6 +59,7 @@ export default function PoolPage() {
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 	const [currentUserName, setCurrentUserName] = useState<string>("Usuario");
+	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
@@ -65,7 +68,45 @@ export default function PoolPage() {
 	const [showMinifigurePartsLots, setShowMinifigurePartsLots] = useState(true);
 	const [showOwnLots, setShowOwnLots] = useState(false);
 	const [lotsPage, setLotsPage] = useState(1);
+	const [editingLotId, setEditingLotId] = useState<string | null>(null);
+	const [editingPartNumInput, setEditingPartNumInput] = useState("");
+	const [editingPartNameInput, setEditingPartNameInput] = useState("");
+	const [editingSearchInput, setEditingSearchInput] = useState("");
+	const [editingSearchLoading, setEditingSearchLoading] = useState(false);
+	const [editingSearchSuggestions, setEditingSearchSuggestions] = useState<PartSuggestion[]>([]);
+	const [savingLotEditId, setSavingLotEditId] = useState<string | null>(null);
 	const imageRequestInFlightRef = useRef<Set<string>>(new Set());
+
+	function normalizePartCodeInput(raw: string) {
+		return String(raw ?? "")
+			.trim()
+			.replace(/^#+\s*/, "")
+			.toUpperCase();
+	}
+
+	function startEditLot(lot: PoolLot) {
+		if (!isMasterUser) return;
+		setEditingLotId(lot.id);
+		setEditingPartNumInput(lot.part_num || "");
+		setEditingPartNameInput(lot.part_name || "");
+		setEditingSearchInput("");
+		setEditingSearchSuggestions([]);
+	}
+
+	function cancelEditLot() {
+		setEditingLotId(null);
+		setEditingPartNumInput("");
+		setEditingPartNameInput("");
+		setEditingSearchInput("");
+		setEditingSearchSuggestions([]);
+	}
+
+	function pickEditingSuggestion(part: PartSuggestion) {
+		setEditingPartNumInput(part.part_num);
+		setEditingPartNameInput(part.name);
+		setEditingSearchInput(`${part.part_num} - ${part.name}`);
+		setEditingSearchSuggestions([]);
+	}
 
 	function isMinifigurePartsListName(listName: string | null | undefined) {
 		const normalized = String(listName ?? "").trim();
@@ -143,6 +184,8 @@ export default function PoolPage() {
 				}
 
 			setCurrentUserId(user.id);
+			const resolvedEmail = String(user.email ?? "").trim().toLowerCase();
+			setIsMasterUser(resolvedEmail === MASTER_EMAIL);
 			setCurrentUserName(
 				(user.user_metadata?.display_name as string) ||
 					(user.user_metadata?.full_name as string) ||
@@ -268,6 +311,106 @@ export default function PoolPage() {
 			setSendingOfferLotId(null);
 		}
 	}
+
+	async function saveLotEdit(lot: PoolLot) {
+		if (!isMasterUser) return;
+
+		const nextPartNum = normalizePartCodeInput(editingPartNumInput);
+		const nextPartName = editingPartNameInput.trim();
+		if (!nextPartNum || !nextPartName) {
+			setMessage("Part num y nombre son obligatorios.");
+			return;
+		}
+
+		setSavingLotEditId(lot.id);
+		setMessage(null);
+		try {
+			const supabase = getSupabaseClient();
+			let {
+				data: { session },
+			} = await supabase.auth.getSession();
+			if (!session?.access_token) {
+				const refreshed = await supabase.auth.refreshSession();
+				session = refreshed.data.session;
+			}
+			if (!session?.access_token) {
+				setMessage("Sesion invalida para editar.");
+				return;
+			}
+
+			const response = await fetch("/api/system/master/list-items/update", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					Authorization: `Bearer ${session.access_token}`,
+				},
+				body: JSON.stringify({
+					list_id: lot.list_id,
+					list_item_id: lot.id,
+					part_num: nextPartNum,
+					part_name: nextPartName,
+				}),
+			});
+			let payload: { error?: string } = {};
+			try {
+				payload = (await response.json()) as { error?: string };
+			} catch {
+				payload = {};
+			}
+			if (!response.ok) {
+				setMessage(payload.error ?? "No se pudo guardar cambios.");
+				return;
+			}
+
+			setPublicLots((current) =>
+				current.map((item) =>
+					item.id === lot.id
+						? {
+								...item,
+								part_num: nextPartNum,
+								part_name: nextPartName,
+							}
+						: item,
+				),
+			);
+			void loadPartImages([{ part_num: nextPartNum, color_name: lot.color_name }]);
+			cancelEditLot();
+			setMessage("Part num y nombre actualizados.");
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "No se pudo guardar cambios.");
+		} finally {
+			setSavingLotEditId(null);
+		}
+	}
+
+	useEffect(() => {
+		if (!editingLotId) return;
+		const query = editingSearchInput.trim();
+		if (query.length < 2) {
+			setEditingSearchSuggestions([]);
+			setEditingSearchLoading(false);
+			return;
+		}
+
+		const timer = window.setTimeout(async () => {
+			setEditingSearchLoading(true);
+			try {
+				const response = await fetch(`/api/rebrickable/parts?q=${encodeURIComponent(query)}&offset=0&limit=15`);
+				const payload = (await response.json()) as { results?: PartSuggestion[] };
+				if (!response.ok) {
+					setEditingSearchSuggestions([]);
+					return;
+				}
+				setEditingSearchSuggestions(payload.results ?? []);
+			} catch {
+				setEditingSearchSuggestions([]);
+			} finally {
+				setEditingSearchLoading(false);
+			}
+		}, 350);
+
+		return () => window.clearTimeout(timer);
+	}, [editingLotId, editingSearchInput]);
 
 	function getPartImageKey(partNum: string, colorName: string | null | undefined) {
 		const normalizedColor = (colorName ?? "")
@@ -569,7 +712,7 @@ export default function PoolPage() {
 												<p>x{lot.quantity}</p>
 												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
 											</div>
-											<div className="mt-1 hidden flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:flex">
+										<div className="mt-1 hidden flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700 sm:flex">
 												<span
 													className="inline-flex w-20 items-center rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold"
 													style={{
@@ -582,6 +725,78 @@ export default function PoolPage() {
 												<p>x{lot.quantity}</p>
 												<p className="font-chewy text-base text-slate-600">{lot.owner_name || "Desconocido"}</p>
 											</div>
+											{isMasterUser ? (
+												<button
+													type="button"
+													onClick={() => startEditLot(lot)}
+													className="mt-2 rounded-md border border-amber-500 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+												>
+													Editar cod/nombre
+												</button>
+											) : null}
+											{isMasterUser && editingLotId === lot.id ? (
+												<div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+													<div className="relative mb-2">
+														<input
+															type="text"
+															value={editingSearchInput}
+															onChange={(event) => setEditingSearchInput(event.target.value)}
+															placeholder="Buscar pieza para reemplazar"
+															className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-slate-900"
+														/>
+														{editingSearchLoading ? <p className="mt-1 text-[11px] text-slate-500">Buscando...</p> : null}
+														{editingSearchSuggestions.length > 0 ? (
+															<ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded border border-amber-200 bg-white text-xs shadow">
+																{editingSearchSuggestions.map((part) => (
+																	<li key={part.part_num}>
+																		<button
+																			type="button"
+																			onClick={() => pickEditingSuggestion(part)}
+																			className="w-full px-2 py-1 text-left hover:bg-amber-50"
+																		>
+																			<span className="font-semibold text-slate-800">{part.part_num}</span>
+																			<span className="ml-1 text-slate-600">{part.name}</span>
+																		</button>
+																	</li>
+																))}
+															</ul>
+														) : null}
+													</div>
+													<div className="grid gap-2 sm:grid-cols-2">
+														<input
+															type="text"
+															value={editingPartNumInput}
+															onChange={(event) => setEditingPartNumInput(event.target.value)}
+															placeholder="part_num"
+															className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-slate-900"
+														/>
+														<input
+															type="text"
+															value={editingPartNameInput}
+															onChange={(event) => setEditingPartNameInput(event.target.value)}
+															placeholder="part_name"
+															className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-slate-900"
+														/>
+													</div>
+													<div className="mt-2 flex justify-end gap-2">
+														<button
+															type="button"
+															onClick={cancelEditLot}
+															className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+														>
+															Cancelar
+														</button>
+														<button
+															type="button"
+															onClick={() => void saveLotEdit(lot)}
+															disabled={savingLotEditId === lot.id}
+															className="rounded border border-amber-700 bg-amber-700 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+														>
+															{savingLotEditId === lot.id ? "Guardando..." : "Guardar"}
+														</button>
+													</div>
+												</div>
+											) : null}
 										</div>
 									</div>
 

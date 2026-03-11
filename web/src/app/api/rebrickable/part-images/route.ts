@@ -8,6 +8,7 @@ import {
 	getCachedImagesByKeys,
 	getFallbackImagesByPartNums,
 	normalizeColorName,
+	type PartImageCacheRow,
 	upsertCachedImages,
 } from "@/lib/image-cache-db";
 
@@ -97,7 +98,7 @@ export async function POST(request: Request) {
 	}> = [];
 
 	const keysToQuery = items.map((item) => getImageKey(item.part_num, item.color_name));
-	let dbRowsByKey = new Map<string, { part_img_url: string | null }>();
+	let dbRowsByKey = new Map<string, PartImageCacheRow>();
 	let fallbackByPartNum = new Map<string, string>();
 	try {
 		dbRowsByKey = await getCachedImagesByKeys(keysToQuery);
@@ -117,10 +118,30 @@ export async function POST(request: Request) {
 
 		const dbRow = dbRowsByKey.get(key);
 		if (dbRow) {
-			imageCacheByKey.set(key, dbRow.part_img_url ?? null);
 			if (dbRow.part_img_url) {
+				imageCacheByKey.set(key, dbRow.part_img_url);
 				imageCacheByPartNum.set(item.part_num, dbRow.part_img_url);
+				continue;
 			}
+
+			if (dbRow.status === "missing") {
+				const fallbackByCatalog = fallbackByPartNum.get(item.part_num) ?? null;
+				if (fallbackByCatalog) {
+					imageCacheByKey.set(key, fallbackByCatalog);
+					imageCacheByPartNum.set(item.part_num, fallbackByCatalog);
+					dbUpserts.push({
+						cache_key: key,
+						part_num: item.part_num,
+						color_name: item.color_name ?? "",
+						color_name_norm: normalizeColorName(item.color_name),
+						part_img_url: fallbackByCatalog,
+						status: "found",
+					});
+					continue;
+				}
+			}
+
+			imageCacheByKey.set(key, null);
 			continue;
 		}
 

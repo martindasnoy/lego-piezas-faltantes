@@ -2735,6 +2735,14 @@ export default function DashboardPage() {
 										>
 											Check new things
 										</button>
+										<button
+											type="button"
+											onClick={() => void repairLegacyListPartNums()}
+											disabled={repairingListPartNums}
+											className="flex w-full items-center justify-center rounded-lg border border-amber-600 bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+										>
+											{repairingListPartNums ? "Reparando..." : "Repair part_num en listas"}
+										</button>
 									</div>
 								</div>
 							</div>

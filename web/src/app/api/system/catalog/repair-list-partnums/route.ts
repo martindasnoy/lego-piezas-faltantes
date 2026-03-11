@@ -150,6 +150,8 @@ async function loadCatalogIndex() {
 }
 
 function findBestMatch(partNum: string | null | undefined, partName: string | null | undefined, index: CatalogIndex) {
+	const partNumRaw = String(partNum ?? "").trim();
+	const missingPartNum = partNumRaw.length === 0;
 	const normalizedNum = compactText(String(partNum ?? "").replace(/^#+\s*/, ""));
 	if (normalizedNum) {
 		const exactNum = index.byNormalizedNum.get(normalizedNum);
@@ -191,7 +193,15 @@ function findBestMatch(partNum: string | null | undefined, partName: string | nu
 		}
 	}
 
-	if (!best || bestScore < 1600) return null;
+	if (!best) return null;
+
+	if (missingPartNum) {
+		const overlap = tokenOverlap(best.tokens, targetTokens);
+		if (bestScore < 900 && overlap < 0.34) return null;
+		return best;
+	}
+
+	if (bestScore < 1600) return null;
 	return best;
 }
 

@@ -21,6 +21,7 @@ import matchIconAnimation from "@/lib/match-icon.json";
 const AUTO_MINIFIG_LIST_NAME = "Piezas Faltantes de Minifiguras";
 const LEGACY_AUTO_MINIFIG_LIST_NAMES = ["Pares Faltantes de Minifcuras", "Faltantes Minifiguras"];
 const SALE_LIST_PREFIX = "venta:";
+const MASTER_EMAIL = "martindasnoy@gmail.com";
 const SEARCH_LOADING_ANIMATION_PATH = "/Lego%20Spinner.json";
 const SUGGESTIONS_PAGE_SIZE = 15;
 const SEARCH_PREWARM_STORAGE_KEY = "parts-search-prewarm-v1";
@@ -188,8 +189,13 @@ export default function ListDetailPage() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [currentUserName, setCurrentUserName] = useState("");
 	const [currentUserEmail, setCurrentUserEmail] = useState("");
+	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#006eb2");
 	const [currentLugSecondaryColor, setCurrentLugSecondaryColor] = useState("#006eb2");
+	const [editingLotMetaId, setEditingLotMetaId] = useState<string | null>(null);
+	const [editingLotPartNumInput, setEditingLotPartNumInput] = useState("");
+	const [editingLotPartNameInput, setEditingLotPartNameInput] = useState("");
+	const [savingLotMetaId, setSavingLotMetaId] = useState<string | null>(null);
 	const [showCatalogModal, setShowCatalogModal] = useState(false);
 	const [showImportExportModal, setShowImportExportModal] = useState(false);
 	const [importExportMode, setImportExportMode] = useState<"import" | "export">("export");
@@ -417,6 +423,7 @@ export default function ListDetailPage() {
 		if (!matchDetailsLotId) return null;
 		return matchesByLot[matchDetailsLotId] ?? null;
 	}, [matchDetailsLotId, matchesByLot]);
+	const canMasterEditPublicList = isMasterUser && Boolean(list?.is_public);
 
 	const LOTS_PER_PAGE = 40;
 	const totalLotsPages = Math.max(1, Math.ceil(lots.length / LOTS_PER_PAGE));
@@ -474,6 +481,82 @@ export default function ListDetailPage() {
 		if (!trimmed) return "";
 		const firstToken = trimmed.split(" - ")[0]?.trim() ?? "";
 		return firstToken.replace(/^#+\s*/, "").trim().toUpperCase();
+	}
+
+	function startEditLotMeta(lot: Lot) {
+		if (!canMasterEditPublicList) return;
+		setEditingLotMetaId(lot.id);
+		setEditingLotPartNumInput(lot.part_num || "");
+		setEditingLotPartNameInput(lot.part_name || "");
+	}
+
+	function cancelEditLotMeta() {
+		setEditingLotMetaId(null);
+		setEditingLotPartNumInput("");
+		setEditingLotPartNameInput("");
+	}
+
+	async function saveLotMeta(lotId: string) {
+		if (!canMasterEditPublicList) return;
+		const nextPartNum = normalizePartCodeInput(editingLotPartNumInput);
+		const nextPartName = editingLotPartNameInput.trim();
+		if (!nextPartNum || !nextPartName) {
+			setMessage("Part num y nombre son obligatorios.");
+			return;
+		}
+
+		setSavingLotMetaId(lotId);
+		setMessage(null);
+		try {
+			const supabase = getSupabaseClient();
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+			if (!session?.access_token) {
+				setMessage("Sesion invalida para editar lista publica.");
+				return;
+			}
+
+			const response = await fetch("/api/system/master/list-items/update", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					Authorization: `Bearer ${session.access_token}`,
+				},
+				body: JSON.stringify({
+					list_id: String(listId),
+					list_item_id: lotId,
+					part_num: nextPartNum,
+					part_name: nextPartName,
+				}),
+			});
+
+			const payload = (await response.json()) as { error?: string };
+			if (!response.ok) {
+				setMessage(payload.error ?? "No se pudo guardar part_num y nombre.");
+				return;
+			}
+
+			const targetLot = lots.find((lot) => lot.id === lotId) ?? null;
+			setLots((current) =>
+				current.map((lot) =>
+					lot.id === lotId
+						? {
+								...lot,
+								part_num: nextPartNum,
+								part_name: nextPartName,
+							}
+						: lot,
+				),
+			);
+			void loadPartImages([{ part_num: nextPartNum, color_name: targetLot?.color_name ?? null }]);
+			cancelEditLotMeta();
+			setMessage("Part num y nombre actualizados.");
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "No se pudo guardar part_num y nombre.");
+		} finally {
+			setSavingLotMetaId(null);
+		}
 	}
 
 	function isSaleListName(listName: string | null | undefined) {
@@ -660,16 +743,42 @@ export default function ListDetailPage() {
 					}
 				}
 
+				let resolvedEmail = String(user.email ?? "").trim().toLowerCase();
+				if (!resolvedEmail) {
+					try {
+						const { data: registeredUsers } = await supabase.rpc("get_registered_users_master");
+						const rows = (registeredUsers as RegisteredUserLookupRow[] | null) ?? [];
+						const byId = rows.find((row) => String(row.user_id) === String(user.id));
+						const fallbackEmail = String(byId?.email ?? "").trim().toLowerCase();
+						if (fallbackEmail) resolvedEmail = fallbackEmail;
+					} catch {
+						// no-op
+					}
+				}
+
 				setCurrentUserName(resolvedUserName);
-				setCurrentUserEmail((user.email ?? "").trim());
+				setCurrentUserEmail(resolvedEmail);
+				const isMaster = resolvedEmail === MASTER_EMAIL;
+				setIsMasterUser(isMaster);
 				await loadCurrentLugColor(user.id);
 
-				const { data: listData, error: listError } = await supabase
+				let { data: listData, error: listError } = await supabase
 					.from("lists")
 					.select("id,name,is_public")
 					.eq("id", listId)
 					.eq("owner_id", user.id)
 					.single();
+
+				if ((listError || !listData) && isMaster) {
+					const fallback = await supabase
+						.from("lists")
+						.select("id,name,is_public")
+						.eq("id", listId)
+						.eq("is_public", true)
+						.single();
+					listData = fallback.data;
+					listError = fallback.error;
+				}
 
 				if (listError || !listData) {
 					setMessage("No se pudo abrir esta lista.");
@@ -2155,6 +2264,15 @@ export default function ListDetailPage() {
 												<span className="block w-full truncate text-left">{lot.color_name || "Sin color"}</span>
 											</button>
 											<span className="font-semibold text-slate-900">#{lot.part_num}</span>
+											{canMasterEditPublicList ? (
+												<button
+													type="button"
+													onClick={() => startEditLotMeta(lot)}
+													className="rounded-md border border-amber-500 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
+												>
+													Editar cod/nombre
+												</button>
+											) : null}
 											<div className="hidden items-center gap-2 sm:flex">
 											<input
 												type="number"
@@ -2247,6 +2365,43 @@ export default function ListDetailPage() {
 													</div>
 												) : null}
 											</div>
+											{canMasterEditPublicList && editingLotMetaId === lot.id ? (
+												<div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+													<div className="grid gap-2 sm:grid-cols-2">
+														<input
+															type="text"
+															value={editingLotPartNumInput}
+															onChange={(event) => setEditingLotPartNumInput(event.target.value)}
+															placeholder="part_num"
+															className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-slate-900"
+														/>
+														<input
+															type="text"
+															value={editingLotPartNameInput}
+															onChange={(event) => setEditingLotPartNameInput(event.target.value)}
+															placeholder="part_name"
+															className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-slate-900"
+														/>
+													</div>
+													<div className="mt-2 flex justify-end gap-2">
+														<button
+															type="button"
+															onClick={cancelEditLotMeta}
+															className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+														>
+															Cancelar
+														</button>
+														<button
+															type="button"
+															onClick={() => void saveLotMeta(lot.id)}
+															disabled={savingLotMetaId === lot.id}
+															className="rounded border border-amber-700 bg-amber-700 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+														>
+															{savingLotMetaId === lot.id ? "Guardando..." : "Guardar"}
+														</button>
+													</div>
+												</div>
+											) : null}
 										</div>
 
 										<div className="flex items-center gap-1">
