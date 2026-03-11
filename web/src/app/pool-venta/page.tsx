@@ -44,6 +44,7 @@ export default function PoolVentaPage() {
 	const [publicLots, setPublicLots] = useState<PoolLot[]>([]);
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
+	const [currentLugColor4, setCurrentLugColor4] = useState("#ffffff");
 	const [partImages, setPartImages] = useState<PartImageLookup>({});
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario" | "valor_asc" | "valor_desc">("pieza");
 	const [showOwnLots, setShowOwnLots] = useState(false);
@@ -53,6 +54,7 @@ export default function PoolVentaPage() {
 	async function loadCurrentLugLogo(userId: string) {
 		if (!userId) {
 			setCurrentLugLogoUrl("");
+			setCurrentLugColor4("#ffffff");
 			return;
 		}
 
@@ -66,25 +68,30 @@ export default function PoolVentaPage() {
 
 			if (membershipsError) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
 			if (rows.length === 0) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
-			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url").eq("id", selected.lug_id).maybeSingle();
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url,color_4").eq("id", selected.lug_id).maybeSingle();
 			if (lugError) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
+			setCurrentLugColor4(String((lug as Record<string, unknown> | null)?.color_4 ?? "#ffffff") || "#ffffff");
 		} catch {
 			setCurrentLugLogoUrl("");
+			setCurrentLugColor4("#ffffff");
 		}
 	}
 
@@ -166,6 +173,30 @@ export default function PoolVentaPage() {
 		return `${partNum.trim()}::${normalizedColor}`;
 	}
 
+	function getBestPartImageUrl(partNum: string, colorName: string | null | undefined) {
+		const byColor = partImages[getPartImageKey(partNum, colorName)];
+		if (byColor) return byColor;
+		return partImages[getPartImageKey(partNum, null)] ?? null;
+	}
+
+	function isUsingGenericPartImage(partNum: string, colorName: string | null | undefined) {
+		const byColor = partImages[getPartImageKey(partNum, colorName)];
+		if (byColor) return false;
+		const byGeneric = partImages[getPartImageKey(partNum, null)];
+		return Boolean(byGeneric);
+	}
+
+	function isNoColorSelected(colorName: string | null | undefined) {
+		return !String(colorName ?? "").trim();
+	}
+
+	function shouldHighlightFallbackImage(partNum: string, colorName: string | null | undefined) {
+		if (isNoColorSelected(colorName)) {
+			return Boolean(getBestPartImageUrl(partNum, colorName));
+		}
+		return isUsingGenericPartImage(partNum, colorName);
+	}
+
 	async function loadPartImages(items: PartImageRequestItem[]) {
 		const normalizedItems = items
 			.map((item) => ({
@@ -174,10 +205,16 @@ export default function PoolVentaPage() {
 			}))
 			.filter((item) => item.part_num.length > 0);
 
-		if (normalizedItems.length === 0) return;
+		const expandedItems: Array<{ part_num: string; color_name: string | null }> = [];
+		for (const item of normalizedItems) {
+			expandedItems.push(item);
+			expandedItems.push({ part_num: item.part_num, color_name: null });
+		}
+
+		if (expandedItems.length === 0) return;
 
 		const uniqueByKey = new Map<string, PartImageRequestItem>();
-		for (const item of normalizedItems) {
+		for (const item of expandedItems) {
 			const key = getPartImageKey(item.part_num, item.color_name);
 			if (!uniqueByKey.has(key)) uniqueByKey.set(key, item);
 		}
@@ -218,9 +255,7 @@ export default function PoolVentaPage() {
 			}
 			setPartImages((current) => ({ ...current, ...additions }));
 		} finally {
-			for (const item of missingItems) {
-				imageRequestInFlightRef.current.delete(getPartImageKey(item.part_num, item.color_name));
-			}
+			for (const item of missingItems) imageRequestInFlightRef.current.delete(getPartImageKey(item.part_num, item.color_name));
 		}
 	}
 
@@ -385,14 +420,22 @@ export default function PoolVentaPage() {
 							<article key={lot.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
-										{partImages[getPartImageKey(lot.part_num, lot.color_name)] ? (
-											<img
-												src={partImages[getPartImageKey(lot.part_num, lot.color_name)] ?? undefined}
-												alt={lot.part_name || lot.part_num}
-												loading="lazy"
-												decoding="async"
-												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-											/>
+										{getBestPartImageUrl(lot.part_num, lot.color_name) ? (
+											<div className="group relative">
+												<img
+													src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
+													alt={lot.part_name || lot.part_num}
+													loading="lazy"
+													decoding="async"
+													className="h-16 w-16 rounded bg-white object-contain"
+													style={{ border: `4px solid ${shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? currentLugColor4 : "#e2e8f0"}` }}
+												/>
+												{shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? (
+													<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-40 -translate-x-1/2 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-center text-[10px] font-medium text-slate-800 opacity-0 shadow transition-opacity duration-150 group-hover:opacity-100">
+														{isNoColorSelected(lot.color_name) ? "No hay color seleccionado" : "No hay imagen en el color elegido"}
+													</div>
+												) : null}
+											</div>
 										) : (
 											<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
 												<span className="leading-none">IMG</span>

@@ -192,6 +192,8 @@ export default function ListDetailPage() {
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [currentLugPrimaryColor, setCurrentLugPrimaryColor] = useState("#006eb2");
 	const [currentLugSecondaryColor, setCurrentLugSecondaryColor] = useState("#006eb2");
+	const [currentLugAccentColor, setCurrentLugAccentColor] = useState("#111827");
+	const [currentLugColor4, setCurrentLugColor4] = useState("#ffffff");
 	const [editingLotMetaId, setEditingLotMetaId] = useState<string | null>(null);
 	const [editingLotPartNumInput, setEditingLotPartNumInput] = useState("");
 	const [editingLotPartNameInput, setEditingLotPartNameInput] = useState("");
@@ -306,6 +308,8 @@ export default function ListDetailPage() {
 		if (!userId) {
 			setCurrentLugPrimaryColor("#006eb2");
 			setCurrentLugSecondaryColor("#006eb2");
+			setCurrentLugAccentColor("#111827");
+			setCurrentLugColor4("#ffffff");
 			return;
 		}
 
@@ -320,6 +324,8 @@ export default function ListDetailPage() {
 			if (membershipsError) {
 				setCurrentLugPrimaryColor("#006eb2");
 				setCurrentLugSecondaryColor("#006eb2");
+				setCurrentLugAccentColor("#111827");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
@@ -327,22 +333,30 @@ export default function ListDetailPage() {
 			if (rows.length === 0) {
 				setCurrentLugPrimaryColor("#006eb2");
 				setCurrentLugSecondaryColor("#006eb2");
+				setCurrentLugAccentColor("#111827");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
-			const { data: lug, error: lugError } = await supabase.from("lugs").select("primary_color,secondary_color").eq("id", selected.lug_id).maybeSingle();
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("primary_color,secondary_color,accent_color,color_4").eq("id", selected.lug_id).maybeSingle();
 			if (lugError) {
 				setCurrentLugPrimaryColor("#006eb2");
 				setCurrentLugSecondaryColor("#006eb2");
+				setCurrentLugAccentColor("#111827");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			setCurrentLugPrimaryColor(String((lug as Record<string, unknown> | null)?.primary_color ?? "#006eb2") || "#006eb2");
 			setCurrentLugSecondaryColor(String((lug as Record<string, unknown> | null)?.secondary_color ?? "#006eb2") || "#006eb2");
+			setCurrentLugAccentColor(String((lug as Record<string, unknown> | null)?.accent_color ?? "#111827") || "#111827");
+			setCurrentLugColor4(String((lug as Record<string, unknown> | null)?.color_4 ?? "#ffffff") || "#ffffff");
 		} catch {
 			setCurrentLugPrimaryColor("#006eb2");
 			setCurrentLugSecondaryColor("#006eb2");
+			setCurrentLugAccentColor("#111827");
+			setCurrentLugColor4("#ffffff");
 		}
 	}
 
@@ -933,6 +947,24 @@ export default function ListDetailPage() {
 		const byColor = partImages[getPartImageKey(partNum, colorName)];
 		if (byColor) return byColor;
 		return partImages[getPartImageKey(partNum, null)] ?? null;
+	}
+
+	function isUsingGenericPartImage(partNum: string, colorName: string | null | undefined) {
+		const byColor = partImages[getPartImageKey(partNum, colorName)];
+		if (byColor) return false;
+		const byGeneric = partImages[getPartImageKey(partNum, null)];
+		return Boolean(byGeneric);
+	}
+
+	function isNoColorSelected(colorName: string | null | undefined) {
+		return !String(colorName ?? "").trim();
+	}
+
+	function shouldHighlightFallbackImage(partNum: string, colorName: string | null | undefined) {
+		if (isNoColorSelected(colorName)) {
+			return Boolean(getBestPartImageUrl(partNum, colorName));
+		}
+		return isUsingGenericPartImage(partNum, colorName);
 	}
 
 	async function loadPartImages(items: PartImageRequestItem[]) {
@@ -2202,13 +2234,21 @@ export default function ListDetailPage() {
 										) : null}
 										<div className="flex w-16 shrink-0 flex-col items-center gap-1">
 											{getBestPartImageUrl(lot.part_num, lot.color_name) ? (
-												<img
-													src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
-													alt={lot.part_name || lot.part_num}
-													loading="lazy"
-													decoding="async"
-													className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-												/>
+												<div className="group relative">
+													<img
+														src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
+														alt={lot.part_name || lot.part_num}
+														loading="lazy"
+														decoding="async"
+														className="h-16 w-16 rounded bg-white object-contain"
+														style={{ border: `4px solid ${shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? currentLugColor4 : "#e2e8f0"}` }}
+													/>
+													{shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? (
+														<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-40 -translate-x-1/2 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-center text-[10px] font-medium text-slate-800 opacity-0 shadow transition-opacity duration-150 group-hover:opacity-100">
+															{isNoColorSelected(lot.color_name) ? "No hay color seleccionado" : "No hay imagen en el color elegido"}
+														</div>
+													) : null}
+												</div>
 											) : (
 												<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
 													<span className="leading-none">IMG</span>

@@ -61,6 +61,7 @@ export default function PoolPage() {
 	const [currentUserName, setCurrentUserName] = useState<string>("Usuario");
 	const [isMasterUser, setIsMasterUser] = useState(false);
 	const [currentLugLogoUrl, setCurrentLugLogoUrl] = useState("");
+	const [currentLugColor4, setCurrentLugColor4] = useState("#ffffff");
 	const [offerQtyByLot, setOfferQtyByLot] = useState<Record<string, number>>({});
 	const [sendingOfferLotId, setSendingOfferLotId] = useState<string | null>(null);
 	const [sortBy, setSortBy] = useState<"pieza" | "usuario">("pieza");
@@ -121,6 +122,7 @@ export default function PoolPage() {
 	async function loadCurrentLugLogo(userId: string) {
 		if (!userId) {
 			setCurrentLugLogoUrl("");
+			setCurrentLugColor4("#ffffff");
 			return;
 		}
 
@@ -134,25 +136,30 @@ export default function PoolPage() {
 
 			if (membershipsError) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			const rows = ((memberships as Array<{ lug_id: string; role: string }> | null) ?? []).filter((row) => row.lug_id);
 			if (rows.length === 0) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			const selected = rows.find((row) => row.role === "admin") ?? rows[0];
-			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url").eq("id", selected.lug_id).maybeSingle();
+			const { data: lug, error: lugError } = await supabase.from("lugs").select("logo_url,color_4").eq("id", selected.lug_id).maybeSingle();
 			if (lugError) {
 				setCurrentLugLogoUrl("");
+				setCurrentLugColor4("#ffffff");
 				return;
 			}
 
 			setCurrentLugLogoUrl(String((lug as Record<string, unknown> | null)?.logo_url ?? "").trim());
+			setCurrentLugColor4(String((lug as Record<string, unknown> | null)?.color_4 ?? "#ffffff") || "#ffffff");
 		} catch {
 			setCurrentLugLogoUrl("");
+			setCurrentLugColor4("#ffffff");
 		}
 	}
 
@@ -427,6 +434,24 @@ export default function PoolPage() {
 		return partImages[getPartImageKey(partNum, null)] ?? null;
 	}
 
+	function isUsingGenericPartImage(partNum: string, colorName: string | null | undefined) {
+		const byColor = partImages[getPartImageKey(partNum, colorName)];
+		if (byColor) return false;
+		const byGeneric = partImages[getPartImageKey(partNum, null)];
+		return Boolean(byGeneric);
+	}
+
+	function isNoColorSelected(colorName: string | null | undefined) {
+		return !String(colorName ?? "").trim();
+	}
+
+	function shouldHighlightFallbackImage(partNum: string, colorName: string | null | undefined) {
+		if (isNoColorSelected(colorName)) {
+			return Boolean(getBestPartImageUrl(partNum, colorName));
+		}
+		return isUsingGenericPartImage(partNum, colorName);
+	}
+
 	async function loadPartImages(items: PartImageRequestItem[]) {
 		const normalizedItems = items
 			.map((item) => ({
@@ -691,13 +716,21 @@ export default function PoolPage() {
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-start gap-3 sm:min-w-0 sm:flex-1">
 										{getBestPartImageUrl(lot.part_num, lot.color_name) ? (
-											<img
-												src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
-												alt={lot.part_name || lot.part_num}
-												loading="lazy"
-												decoding="async"
-												className="h-16 w-16 rounded border border-slate-200 bg-white object-contain"
-											/>
+											<div className="group relative">
+												<img
+													src={getBestPartImageUrl(lot.part_num, lot.color_name) ?? undefined}
+													alt={lot.part_name || lot.part_num}
+													loading="lazy"
+													decoding="async"
+													className="h-16 w-16 rounded bg-white object-contain"
+													style={{ border: `4px solid ${shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? currentLugColor4 : "#e2e8f0"}` }}
+												/>
+												{shouldHighlightFallbackImage(lot.part_num, lot.color_name) ? (
+													<div className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-40 -translate-x-1/2 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-center text-[10px] font-medium text-slate-800 opacity-0 shadow transition-opacity duration-150 group-hover:opacity-100">
+														{isNoColorSelected(lot.color_name) ? "No hay color seleccionado" : "No hay imagen en el color elegido"}
+													</div>
+												) : null}
+											</div>
 										) : (
 											<div className="flex h-16 w-16 flex-col items-center justify-center rounded border border-slate-200 bg-slate-100 text-[9px] text-slate-500">
 												<span className="leading-none">IMG</span>
