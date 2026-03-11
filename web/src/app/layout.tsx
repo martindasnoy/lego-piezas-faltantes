@@ -59,7 +59,12 @@ export default function RootLayout({
 			<head>
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml"></link>
 			</head>
-			<body className={`${geistSans.variable} ${geistMono.variable} ${chewy.variable} antialiased`}>{children}</body>
+			<body className={`${geistSans.variable} ${geistMono.variable} ${chewy.variable} flex min-h-screen flex-col antialiased`}>
+				<div className="flex-1">{children}</div>
+				<footer className="bg-lego-tile flex justify-center px-3 py-2">
+					<p className="text-[11px] font-semibold tracking-wide text-white/95 drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)]">By Martin Dasnoy</p>
+				</footer>
+			</body>
 		</html>
 	);
 }

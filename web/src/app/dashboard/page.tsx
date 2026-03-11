@@ -2114,7 +2114,7 @@ export default function DashboardPage() {
 					</div>
 				</header>
 
-				<section className="grid gap-4 md:grid-cols-3">
+				<section className="grid gap-1 md:grid-cols-3">
 					<div className="md:col-span-2 flex flex-col gap-4">
 						<section className="rounded-xl border border-slate-300 bg-[#f5f5f5] p-3 sm:p-4">
 							<div className="flex flex-wrap items-center gap-2">
@@ -2309,11 +2309,11 @@ export default function DashboardPage() {
 						</div>
 
 						{showLugsModule ? (
-							<div className="rounded-xl border border-slate-200 p-4 text-center sm:p-5">
+							<div className="rounded-xl border border-slate-200 p-1 text-center sm:p-1">
 								<div className="flex justify-center">
-									<Image src={mundoImage} alt="LUGs" className="h-24 w-24 object-contain" />
+									<Image src={mundoImage} alt="LUGs" className="h-36 w-36 object-contain" />
 								</div>
-								<div className="mt-4 flex justify-center">
+								<div className="mt-1 mb-3 flex justify-center">
 									<button
 										type="button"
 										onClick={() => void openLugsDirectoryModal()}
@@ -3333,7 +3333,6 @@ export default function DashboardPage() {
 					>
 						Cerrar sesion
 					</button>
-					<p className="mt-2 text-center text-xs text-slate-500">Version by Martin Dasnoy - Faltantes_1.4</p>
 				</div>
 			</main>
 		</div>
